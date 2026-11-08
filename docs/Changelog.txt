@@ -16,13 +16,12 @@ FEATURES:
 
 - add -v command line option to just output the version and quit
 - add -CaptureAttract command line option to automatically capture an attract video
-- B2S plugin: add a 'Keep aspect ratio' setting (plugin settings page) which keeps the aspect ratio of the backglass
-  and score view images, filling the rest of the window with black borders on the sides matching the window shape.
-  The aspect reference is the whole backglass image, so hiding the grill does not grow the borders, and two settings
-  tune the borders for windows whose shape is far from the image shape, such as portrait backglass screens:
-  'Max border' limits them (percent of the view per side, default 5, 0 removes the limit) and 'Border alignment'
-  splits them between both sides (centered) or puts them all on one side, since backglass content (dot matrix,
-  scores, inserts) is authored at the bottom of the image and a centered border cuts it
+- B2S plugin: add a 'Keep aspect ratio' setting (plugin settings page) which fits the backglass and score view
+  images in their window at their authored aspect ratio. The whole view is scaled as one picture (image,
+  illuminations, scores, dot matrices) into the largest rectangle of that shape which fits the window, centered,
+  and the leftover area is filled with black borders: nothing is ever cropped and the borders never paint over
+  the artwork. The aspect reference is the whole backglass image, grill included, so hiding the grill leaves the
+  borders as they are. Turn it off to stretch the images over the whole window
 - B2S Pro: .B2SPro documents are edited and saved exactly like the legacy .directb2s ones
 - B2S Pro: the plugin is built under its own 'plugins/b2s-pro' plugin folder, with the 'B2SPro' plugin id and the
   'plugin-b2spro' / 'plugin-b2spro64' libraries, so that it can be installed next to the stock B2S plugin without

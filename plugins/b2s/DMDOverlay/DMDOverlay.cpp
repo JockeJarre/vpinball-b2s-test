@@ -166,8 +166,8 @@ void Renderer::Render(VPXRenderContext2D* ctx, Display& display, VPXTexture artw
       // Second layer: emitter
       m_dmdTex, dmdTint.x, dmdTint.y, dmdTint.z, 1.f, 1.f, // DMD emitter, emitter tint, emitter brightness, emitter alpha
       glassPad.x, glassPad.y, glassPad.z, glassPad.w, // Emitter padding (from glass border)
-      // Render quad
-      static_cast<float>(frame.x), static_cast<float>(frame.y), static_cast<float>(frame.z), static_cast<float>(frame.w));
+      // Render quad, through the fit transform of the window
+      m_viewOX + static_cast<float>(frame.x) * m_viewRX, m_viewOY + static_cast<float>(frame.y) * m_viewRY, static_cast<float>(frame.z) * m_viewRX, static_cast<float>(frame.w) * m_viewRY);
 }
 
 vec4<int> Renderer::SearchDmdSubFrame(VPXTexture image, const VPXTextureInfo* const texInfo, float dmdAspectRatio, const LogFn& log) const

@@ -553,12 +553,17 @@ void SegGraphics::SyncTexture()
    m_needsTextureUpdate = false;
 }
 
-void SegGraphics::DrawToContext(VPXRenderContext2D* ctx, int left, int top)
+void SegGraphics::DrawToContext(VPXRenderContext2D* ctx, int left, int top, float ox, float oy, float rx, float ry)
 {
    VPXTexture texture = GetTexture();
    if (texture && ctx->DrawImage)
    {
-      ctx->DrawImage(ctx, texture, 1.0f, 1.0f, 1.0f, 1.0f, 0, 0, (float)m_width, (float)m_height, 0, 0, 0, (float)left, (float)top, (float)m_width, (float)m_height);
+      // The KeepAspectRatio fit transform of the window, applied to the placement given in its source units
+      const float x = ox + static_cast<float>(left) * rx;
+      const float y = oy + static_cast<float>(top) * ry;
+      const float w = static_cast<float>(m_width) * rx;
+      const float h = static_cast<float>(m_height) * ry;
+      ctx->DrawImage(ctx, texture, 1.0f, 1.0f, 1.0f, 1.0f, 0, 0, (float)m_width, (float)m_height, 0, 0, 0, x, y, w, h);
    }
 }
 
