@@ -13,6 +13,24 @@
 # Dependencies: cmake, ninja or make, and the mingw-w64 toolchain:
 #   Debian/Ubuntu:  sudo apt install mingw-w64
 #   MSYS2 UCRT64:   pacman -S mingw-w64-ucrt-x86_64-gcc   (see the x64 line below)
+#
+# No root on a Debian/Ubuntu box: the toolchain can be extracted in the home directory, the
+# gcc/g++ binaries find their install directory relative to themselves so a plain 'dpkg -x'
+# tree works (the -posix variants are used, the win32 ones have no POSIX threads):
+#   mkdir -p ~/.local/mingw/dl ~/.local/mingw/root; cd ~/.local/mingw/dl
+#   apt-get download binutils-mingw-w64-base binutils-mingw-w64-x86-64 mingw-w64-common \
+#      mingw-w64-x86-64-dev gcc-mingw-w64-base gcc-mingw-w64-x86-64-posix-runtime \
+#      gcc-mingw-w64-x86-64-posix g++-mingw-w64-x86-64-posix
+#   apt-get download binutils-mingw-w64-i686 mingw-w64-i686-dev gcc-mingw-w64-i686-posix-runtime \
+#      gcc-mingw-w64-i686-posix g++-mingw-w64-i686-posix      # for the x86 plugin
+#   for d in *.deb; do dpkg -x "$d" ~/.local/mingw/root; done
+#   cd ~/.local/mingw/root/usr/bin
+#   ln -sf x86_64-w64-mingw32-gcc-posix  x86_64-w64-mingw32-gcc
+#   ln -sf x86_64-w64-mingw32-g++-posix  x86_64-w64-mingw32-g++
+#   ln -sf i686-w64-mingw32-gcc-posix    i686-w64-mingw32-gcc
+#   ln -sf i686-w64-mingw32-g++-posix    i686-w64-mingw32-g++
+#   export PATH=~/.local/mingw/root/usr/bin:$PATH
+#
 #   Windows/MSVC:   use the 'b2s-plugin' GitHub Actions workflow, or
 #                   cmake -DPLATFORM=windows -DARCH=x64 -DBUILD_APP=OFF -B build &&
 #                   cmake --build build --config Release --target B2SPlugin --parallel
@@ -88,7 +106,12 @@ cmake --build "${BUILD_DIR}" --target B2SPlugin -j"$(nproc)"
 # Stage the mingw runtime next to the plugin so the folder can be dropped into a Visual
 # Pinball installation as is ('-print-file-name' resolves them inside the toolchain)
 OUT="${BUILD_DIR}/plugins/b2s-pro"
-for dll in libstdc++-6.dll libgcc_s_seh-1.dll libwinpthread-1.dll; do
+# The 32 bit libgcc runtime is the dwarf2 one, the 64 bit one the SEH one
+case "${ARCH}" in
+   x64) gcc_runtime=libgcc_s_seh-1.dll ;;
+   *)   gcc_runtime=libgcc_s_dw2-1.dll ;;
+esac
+for dll in libstdc++-6.dll "${gcc_runtime}" libwinpthread-1.dll; do
    src="$("${CXX}" -print-file-name="${dll}")"
    if [ -f "${src}" ]; then
       cp -f "${src}" "${OUT}/"

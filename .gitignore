@@ -35,3 +35,7 @@ VisualPinball.sln
 /.build
 
 /.cache/
+
+# local plugin build output
+/build-b2s*/
+/b2s-pro-*.zip
