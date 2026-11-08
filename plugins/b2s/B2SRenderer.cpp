@@ -23,7 +23,7 @@ MSGPI_BOOL_VAL_SETTING(upgradedSegRenderingProp, "UpgradedSegmentRendering", "Up
 MSGPI_BOOL_VAL_SETTING(keepAspectRatioProp, "KeepAspectRatio", "Keep aspect ratio",
    "Keep the aspect ratio of the backglass and score view images, filling the rest of the window with black borders (turn off to stretch the images over the whole window)", true, false);
 MSGPI_INT_VAL_SETTING(maxBorderProp, "MaxBorder", "Max border",
-   "Limit of KeepAspectRatio borders, percent of the view per side (0 removes the limit)", true, 0, 50, 15);
+   "Limit of KeepAspectRatio borders, percent of the view per side (0 removes the limit, 50 is the full border)", true, 0, 50, 5);
 
 static const char* dualModeValues[] = { "Authentic", "Fantasy" };
 MSGPI_ENUM_VAL_SETTING(dualModeProp, "DualMode", "Dual Mode", "Active mode for dual backglasses (authentic or fantasy)", true, 1, 2, dualModeValues, 1);
@@ -227,9 +227,9 @@ int B2SRenderer::FillSettingsItems(PagedUIItemDef* items)
    items[4].type = PAGEDUI_ITEM_INT;
    items[4].id = "MaxBorder";
    items[4].label = "Max border";
-   items[4].tooltip = "Limit of KeepAspectRatio borders, percent of the view per side (0 removes the limit)";
+   items[4].tooltip = "Limit of KeepAspectRatio borders, percent of the view per side (0 removes the limit, 50 is the full border)";
    items[4].storage = PAGEDUI_STORAGE_HOST;
-   items[4].intProp = { 0, 50, 15, "%d%%", &MaxBorderGet, &MaxBorderSet };
+   items[4].intProp = { 0, 50, 5, "%d%%", &MaxBorderGet, &MaxBorderSet };
    return 5;
 }
 
