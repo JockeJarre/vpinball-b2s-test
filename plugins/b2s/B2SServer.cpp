@@ -74,13 +74,13 @@ namespace
       info->info = nullptr;
    }
 
-   unsigned int MSGPIAPI SettingsItemCount(void*, const char*) { return 10; }
+   unsigned int MSGPIAPI SettingsItemCount(void*, const char*) { return 11; }
 
    void MSGPIAPI SettingsGetItems(void*, const char*, PagedUIItemDef* items)
    {
       int pos = 0;
       FillHeader(items[pos++], "Backglass Settings");
-      pos += B2SRenderer::FillSettingsItems(items + pos); // ShowGrill, DualMode, UpgradedSegmentRendering, KeepAspectRatio, MaxBorder
+      pos += B2SRenderer::FillSettingsItems(items + pos); // ShowGrill, DualMode, UpgradedSegmentRendering, KeepAspectRatio, MaxBorder, BorderAlignment
       PagedUIItemDef& ledType = items[pos++];
       ledType = {};
       ledType.type = PAGEDUI_ITEM_ENUM;

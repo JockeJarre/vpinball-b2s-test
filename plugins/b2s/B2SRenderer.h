@@ -34,7 +34,7 @@ public:
    ~B2SRenderer();
 
    static void RegisterSettings(const MsgPluginAPI* const msgApi, unsigned int endpointId);
-   // Fills the renderer owned entries (ShowGrill, DualMode, UpgradedSegmentRendering, KeepAspectRatio, MaxBorder) of the plugin
+   // Fills the renderer owned entries (ShowGrill, DualMode, UpgradedSegmentRendering, KeepAspectRatio, MaxBorder, BorderAlignment) of the plugin
    // declared "settings" sheet, returns the number of items filled
    static int FillSettingsItems(PagedUIItemDef* items);
 

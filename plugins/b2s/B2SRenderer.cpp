@@ -24,6 +24,10 @@ MSGPI_BOOL_VAL_SETTING(keepAspectRatioProp, "KeepAspectRatio", "Keep aspect rati
    "Keep the aspect ratio of the backglass and score view images, filling the rest of the window with black borders (turn off to stretch the images over the whole window)", true, false);
 MSGPI_INT_VAL_SETTING(maxBorderProp, "MaxBorder", "Max border",
    "Limit of KeepAspectRatio borders, percent of the view per side (0 removes the limit, 50 is the full border)", true, 0, 50, 5);
+static const char* borderAlignValues[] = { "Centered", "Top / Left", "Bottom / Right" };
+MSGPI_ENUM_VAL_SETTING(borderAlignProp, "BorderAlignment", "Border alignment",
+   "Where the KeepAspectRatio borders go: centered splits them, Top / Left puts them all on the top (left), Bottom / Right puts them all at the bottom (right). Backglass content (dot matrix, scores) is authored at the bottom of the image, so a centered border cuts it",
+   true, 0, 3, borderAlignValues, 0);
 
 static const char* dualModeValues[] = { "Authentic", "Fantasy" };
 MSGPI_ENUM_VAL_SETTING(dualModeProp, "DualMode", "Dual Mode", "Active mode for dual backglasses (authentic or fantasy)", true, 1, 2, dualModeValues, 1);
@@ -177,6 +181,7 @@ void B2SRenderer::RegisterSettings(const MsgPluginAPI* const msgApi, unsigned in
    msgApi->RegisterSetting(endpointId, &upgradedSegRenderingProp);
    msgApi->RegisterSetting(endpointId, &keepAspectRatioProp);
    msgApi->RegisterSetting(endpointId, &maxBorderProp);
+   msgApi->RegisterSetting(endpointId, &borderAlignProp);
 }
 
 namespace
@@ -191,6 +196,8 @@ namespace
    void MSGPIAPI KeepAspectRatioSet(void*, int v) { keepAspectRatioProp_Set(v); }
    int MSGPIAPI MaxBorderGet(void*) { return maxBorderProp_Get(); }
    void MSGPIAPI MaxBorderSet(void*, int v) { maxBorderProp_Set(v); }
+   int MSGPIAPI BorderAlignGet(void*) { return borderAlignProp_Get(); }
+   void MSGPIAPI BorderAlignSet(void*, int v) { borderAlignProp_Set(v); }
 }
 
 int B2SRenderer::FillSettingsItems(PagedUIItemDef* items)
@@ -230,7 +237,14 @@ int B2SRenderer::FillSettingsItems(PagedUIItemDef* items)
    items[4].tooltip = "Limit of KeepAspectRatio borders, percent of the view per side (0 removes the limit, 50 is the full border)";
    items[4].storage = PAGEDUI_STORAGE_HOST;
    items[4].intProp = { 0, 50, 5, "%d%%", &MaxBorderGet, &MaxBorderSet };
-   return 5;
+   items[5] = {};
+   items[5].type = PAGEDUI_ITEM_ENUM;
+   items[5].id = "BorderAlignment";
+   items[5].label = "Border alignment";
+   items[5].tooltip = "Where the KeepAspectRatio borders go: centered splits them, Top / Left puts them all on the top (left), Bottom / Right puts them all at the bottom (right)";
+   items[5].storage = PAGEDUI_STORAGE_HOST;
+   items[5].enumProp = { 0, 3, borderAlignValues, 0, &BorderAlignGet, &BorderAlignSet };
+   return 6;
 }
 
 // KeepAspectRatio rendering: the host stretches the source surface over the whole window, so keeping the
@@ -266,14 +280,22 @@ void B2SRenderer::RenderAspectBars(VPXRenderContext2D* ctx, const float refWidth
 
    // Borders are given as a fraction of the source surface, the host maps it proportionally onto the window
    const float cap = maxBorderProp_Get() / 100.f; // 0 = no limit
+   const int align = borderAlignProp_Get(); // 0 centered, 1 top/left, 2 bottom/right
    if (refAspect < wndAspect)
    {
       // The reference is narrower than the window: pillarbox, bars on the left and right
       float barW = 0.5f * ctx->srcWidth * (1.f - refAspect / wndAspect);
       if (cap > 0.f)
          barW = std::min(barW, cap * ctx->srcWidth);
-      drawBar(0.f, 0.f, barW, ctx->srcHeight);
-      drawBar(ctx->srcWidth - barW, 0.f, barW, ctx->srcHeight);
+      if (align == 1)
+         drawBar(0.f, 0.f, 2.f * barW, ctx->srcHeight);
+      else if (align == 2)
+         drawBar(ctx->srcWidth - 2.f * barW, 0.f, 2.f * barW, ctx->srcHeight);
+      else
+      {
+         drawBar(0.f, 0.f, barW, ctx->srcHeight);
+         drawBar(ctx->srcWidth - barW, 0.f, barW, ctx->srcHeight);
+      }
    }
    else
    {
@@ -281,8 +303,15 @@ void B2SRenderer::RenderAspectBars(VPXRenderContext2D* ctx, const float refWidth
       float barH = 0.5f * ctx->srcHeight * (1.f - wndAspect / refAspect);
       if (cap > 0.f)
          barH = std::min(barH, cap * ctx->srcHeight);
-      drawBar(0.f, 0.f, ctx->srcWidth, barH);
-      drawBar(0.f, ctx->srcHeight - barH, ctx->srcWidth, barH);
+      if (align == 1)
+         drawBar(0.f, 0.f, ctx->srcWidth, 2.f * barH); // All of it on the top, keeps the bottom content (dot matrix, scores)
+      else if (align == 2)
+         drawBar(0.f, ctx->srcHeight - 2.f * barH, ctx->srcWidth, 2.f * barH);
+      else
+      {
+         drawBar(0.f, 0.f, ctx->srcWidth, barH);
+         drawBar(0.f, ctx->srcHeight - barH, ctx->srcWidth, barH);
+      }
    }
 }
 
