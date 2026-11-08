@@ -22,7 +22,7 @@ Date: 2026-11-08 · Branch `b2s-pro`, code tip `1a1baa010` (this document and it
 | `097249225` | 18:05 | `Center vertically` setting (default on; off = content on the floor) |
 | `4eb064b7b` | 18:26 | Content **centered horizontally**, no setting for it; `DrawBackgroundPatch` double-offset fix |
 | `79cb1f491` | 19:22 | handover: the save target of the DMD overlay edits spelled out |
-| `1a1baa010` | 19:40 | **`Strict file name match`** setting: loose backglass file matching, table name matched up to its first `)` (§4) |
+| `1a1baa010` | 19:33 | **`Strict file name match`** setting: loose backglass file matching, table name matched up to its first `)` (§4) |
 
 `git diff --stat 9a111ce35^..HEAD` — 19 files, +275 / −94.
 
@@ -173,7 +173,10 @@ Details:
   never re-reads a document that is already loaded.
 
 Exercised with a standalone copy of the algorithm (`/tmp/b2sfind_test.cpp`, 8 cases: exact-wins,
-strict-off-loose, no-parenthesis, multi-variant tie-break), all as specified.
+strict-off-loose, no-parenthesis, multi-variant tie-break), all as specified. Field case at hand: the
+share holds `Big Guns (Williams 1987)1-1.vpx` — prefix `Big Guns (Williams 1987)` — with no backglass
+file of that name next to it, so it is the table to try this on (`Big Guns (Williams 1987).B2SPro` from
+the B2S Pro release goes next to it, loose matching has to be turned off for it).
 
 ---
 
@@ -223,16 +226,32 @@ PATH=~/.local/mingw/root/usr/bin:$PATH ./tools/build_b2s_plugin_windows.sh x86 R
 * MSVC `windows-x64` / `windows-x86` still need a Windows/MSVC box (CI); the mingw build is
   functionally the same plugin, only the C/C++ runtime differs.
 
-Artifacts dropped on the share (x64, commit `4eb064b7b`):
+* The build script **does not zip** the result: it only stages `plugin-b2spro64.dll` /
+  `plugin-b2spro.dll`, `plugin.cfg` and the runtime DLLs in
+  `build-b2s-win-<arch>/plugins/b2s-pro/`. Zip that folder and name the zip after the commit — a zip
+  left over from an earlier build is easy to ship by accident (it happened, hence the commit-named
+  files). No `unzip` on this box, use python:
+
+```bash
+python3 - <<'EOF'
+import zipfile, os
+out = "build-b2s-win-x64/plugins/b2s-pro"
+with zipfile.ZipFile("b2s-pro-windows-x64-<sha>.zip", "w", zipfile.ZIP_DEFLATED) as z:
+    for f in sorted(os.listdir(out)): z.write(os.path.join(out, f), f)
+EOF
+```
+
+Artifacts dropped on the share (x64, commit `1a1baa010`):
 
 ```
-/mnt/pinball/B2Spro/b2s-pro-windows-x64-4eb064b7b.zip   9.08 MB
-/mnt/pinball/B2Spro/b2s-pro-4eb064b7b/                  unpacked, drop-in ready
+/mnt/pinball/B2Spro/b2s-pro-windows-x64-1a1baa010.zip   9.08 MB  md5 a63afc302b1ca5c67663e1923175734f
+/mnt/pinball/B2Spro/b2s-pro-1a1baa010/                  unpacked, drop-in ready
     plugin-b2spro64.dll   plugin.cfg
     libgcc_s_seh-1.dll    libstdc++-6.dll    libwinpthread-1.dll
 ```
 
-Install as `plugins/b2s-pro/`.
+Install as `plugins/b2s-pro/`. The `4eb064b7b` artifacts were removed from the share (same renderer,
+they lack the file-name matching).
 
 ---
 
@@ -272,14 +291,16 @@ Verdict: near-identical siblings from the same `Update for B2S pro` base.
 1. **Test on the real display** (`4eb064b7b`): round stays round, nothing cropped, black only in the
    leftover area, AFM DMD rows 79–93 % fully visible, grill shown/hidden → identical border
    geometry, with and without `Center vertically`.
-2. **CI**: raise the Actions spending limit, or move the job to `ubuntu-latest` + mingw.
-3. Rebuild the Windows artifacts after any further renderer change (only the mingw ones are current).
-4. Cherry-pick the final commits onto the main `vpinball` repo branch `b2s-keep-aspect-ratio`.
-5. Decide on the 6 upstream fix/diagnostics cherry-picks (§8).
-8. **Open decision, closed on review**: saving a document loaded from a legacy `.directb2s` into a
+2. **Test the loose file matching** (`1a1baa010`): `Big Guns (Williams 1987)1-1.vpx` on the share,
+   with the backglass of the pair name next to it, strict off — and confirm strict on finds nothing.
+3. **CI**: raise the Actions spending limit, or move the job to `ubuntu-latest` + mingw.
+4. Rebuild the Windows artifacts after any further renderer change (only the mingw ones are current).
+5. Cherry-pick the final commits onto the main `vpinball` repo branch `b2s-keep-aspect-ratio`.
+6. Decide on the 6 upstream fix/diagnostics cherry-picks (§8).
+7. **Open decision, closed on review**: saving a document loaded from a legacy `.directb2s` into a
    `.B2SPro` sibling (`4d51d1684`) was implemented, reviewed and **dropped** — saves stay in the
    loaded file (§3).
-9. `resources/` is untracked; add `.gitattributes` and commit if the samples should live in the repo.
+8. `resources/` is untracked; add `.gitattributes` and commit if the samples should live in the repo.
 
 ---
 
