@@ -1,6 +1,6 @@
 # B2S Pro — KeepAspectRatio handover
 
-Date: 2026-11-08 · Branch `b2s-pro`, code tip `4eb064b7b` (this document and its updates on top)
+Date: 2026-11-08 · Branch `b2s-pro`, code tip `1a1baa010` (this document and its updates on top)
 · Repo `JockeJarre/vpinball-b2s-test`
 
 ---
@@ -21,6 +21,8 @@ Date: 2026-11-08 · Branch `b2s-pro`, code tip `4eb064b7b` (this document and it
 | `103f86466` | 17:52 | **Surface padding replaces the per-object transform** (the current, final model) |
 | `097249225` | 18:05 | `Center vertically` setting (default on; off = content on the floor) |
 | `4eb064b7b` | 18:26 | Content **centered horizontally**, no setting for it; `DrawBackgroundPatch` double-offset fix |
+| `79cb1f491` | 19:22 | handover: the save target of the DMD overlay edits spelled out |
+| `1a1baa010` | 19:40 | **`Strict file name match`** setting: loose backglass file matching, table name matched up to its first `)` (§4) |
 
 `git diff --stat 9a111ce35^..HEAD` — 19 files, +275 / −94.
 
@@ -141,7 +143,41 @@ cannot stall the play thread.
 
 ---
 
-## 4. Packaging and CI
+## 4. Backglass file lookup — loose matching (`1a1baa010`)
+
+A feature of the original B2S Server: the backglass file does not have to be named exactly after the
+table. New setting **`Strict file name match`** (id `StrictFileNameMatch`, on the backglass settings
+page, **on** by default).
+
+`FindB2SFile()` (`B2SServer.cpp`) in priority order:
+
+1. **full name match, always first, whatever the setting says** — `<tableName>.B2SPro`,
+   `<tableName>.directb2s`, then the same two with the *folder* name (the file layout where the table
+   shares its folder with `b2s` / `pup` / `flex` / music companions);
+2. only with the setting **off**, and only when step 1 found nothing: the name **prefix**, which is the
+   table name through its first `)` — the `FlipperName (Company Year)` the pair is conventionally named
+   after — scanned over the folder: `Big Guns (Williams 1987) Something Else.vpx` takes
+   `Big Guns (Williams 1987).B2SPro`, and `Big Guns (Williams 1987).vpx` also takes it (its full name
+   match is found in step 1 anyway).
+
+Details:
+
+- `.B2SPro` outranks `.directb2s` at every stage, both in the exact and in the loose stage.
+- A name **without** `)` has the whole name as prefix, so it stays an exact match: `Big Guns 1.2.vpx`
+  does **not** accept `Big Guns.B2SPro`.
+- A folder with several matching variants resolves to the name **closest** to the prefix (the shortest,
+  then alphabetically), so it resolves the same way at every load; the prefix comparison is
+  case-insensitive, like everything else in the lookup.
+- Changing the setting takes effect **at the next table load** — the document lookup runs in
+  `TryLoadB2S()`, which is called on table start, on `SetTableName` and on `SetWorkingDir`, and it
+  never re-reads a document that is already loaded.
+
+Exercised with a standalone copy of the algorithm (`/tmp/b2sfind_test.cpp`, 8 cases: exact-wins,
+strict-off-loose, no-parenthesis, multi-variant tie-break), all as specified.
+
+---
+
+## 5. Packaging and CI
 
 * **Standalone coexistence**: `Update for B2S pro` renamed the plugin (`plugin.cfg` id `B2SPro`,
   `plugin-b2spro[64]`) but not the build. CMake, the VS projects and the build script now emit
@@ -161,7 +197,7 @@ cannot stall the play thread.
 
 ---
 
-## 5. Local builds (no CI needed for testing)
+## 6. Local builds (no CI needed for testing)
 
 Linux native (plugin only):
 
@@ -200,7 +236,7 @@ Install as `plugins/b2s-pro/`.
 
 ---
 
-## 6. Reference geometry (measured / computed)
+## 7. Reference geometry (measured / computed)
 
 | Case | Numbers |
 |---|---|
@@ -217,7 +253,7 @@ Sample files: `resources/backglass/` (`300 (Gottlieb 1975).B2SPro`, `Attack from
 
 ---
 
-## 7. Upstream comparison (`evilwraith/vpinball@b2spro-plugin`, Wes Smith, 19 commits on `42fd8405a`)
+## 8. Upstream comparison (`evilwraith/vpinball@b2spro-plugin`, Wes Smith, 19 commits on `42fd8405a`)
 
 Verdict: near-identical siblings from the same `Update for B2S pro` base.
 
@@ -231,7 +267,7 @@ Verdict: near-identical siblings from the same `Update for B2S pro` base.
 
 ---
 
-## 8. Open items
+## 9. Open items
 
 1. **Test on the real display** (`4eb064b7b`): round stays round, nothing cropped, black only in the
    leftover area, AFM DMD rows 79–93 % fully visible, grill shown/hidden → identical border
@@ -239,7 +275,7 @@ Verdict: near-identical siblings from the same `Update for B2S pro` base.
 2. **CI**: raise the Actions spending limit, or move the job to `ubuntu-latest` + mingw.
 3. Rebuild the Windows artifacts after any further renderer change (only the mingw ones are current).
 4. Cherry-pick the final commits onto the main `vpinball` repo branch `b2s-keep-aspect-ratio`.
-5. Decide on the 6 upstream fix/diagnostics cherry-picks (§7).
+5. Decide on the 6 upstream fix/diagnostics cherry-picks (§8).
 8. **Open decision, closed on review**: saving a document loaded from a legacy `.directb2s` into a
    `.B2SPro` sibling (`4d51d1684`) was implemented, reviewed and **dropped** — saves stay in the
    loaded file (§3).
@@ -247,9 +283,9 @@ Verdict: near-identical siblings from the same `Update for B2S pro` base.
 
 ---
 
-## 9. Settings today (backglass page, 10 items)
+## 10. Settings today (backglass page, 11 items)
 
 Show Grill · Dual Mode · Upgraded segment rendering · **Keep aspect ratio** · **Center vertically**
-· Used LED type · All slowdown · Slowdowns · (2 section headers)
+· Used LED type · **Strict file name match** · All slowdown · Slowdowns · (2 section headers)
 
-Changelog entries: `docs/Changelog.txt` lines 19–27.
+Changelog entries: `docs/Changelog.txt` lines 19–34.
