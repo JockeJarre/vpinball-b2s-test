@@ -34,12 +34,15 @@ namespace B2S
 
 static const char* usedLEDTypeValues[] = { "Auto", "Rendered", "Dream7" };
 MSGPI_ENUM_VAL_SETTING(usedLEDTypeProp, "UsedLEDType", "Used LED type", "Force the LED display type (Auto = as declared by the .directb2s file)", true, 0, 3, usedLEDTypeValues, 0);
+MSGPI_BOOL_VAL_SETTING(strictFileNameProp, "StrictFileNameMatch", "Strict file name match",
+   "Require the backglass file to be named exactly after the table. Turned off, a table named 'Big Guns (Williams 1987) Something Else' also finds the backglass named 'Big Guns (Williams 1987).B2SPro'. Takes effect at the next table load", true, true);
 MSGPI_INT_VAL_SETTING(allAnimationSlowDownProp, "AllAnimationSlowDown", "Global animation slowdown", "Slowdown factor applied to all backglass animations", true, 1, 100, 1);
 MSGPI_STRING_VAL_SETTING(animationSlowDownsProp, "AnimationSlowDowns", "Per-animation slowdowns", "Semicolon separated 'name=factor' animation slowdown overrides", true, "", 1024);
 
 void B2SServer::RegisterSettings(const MsgPluginAPI* const msgApi, unsigned int endpointId)
 {
    msgApi->RegisterSetting(endpointId, &usedLEDTypeProp);
+   msgApi->RegisterSetting(endpointId, &strictFileNameProp);
    msgApi->RegisterSetting(endpointId, &allAnimationSlowDownProp);
    msgApi->RegisterSetting(endpointId, &animationSlowDownsProp);
 }
@@ -57,6 +60,54 @@ namespace
    void MSGPIAPI SlowdownsSet(void*, const char* v) { animationSlowDownsProp_Set(v); }
    int MSGPIAPI LedTypeGet(void*) { return usedLEDTypeProp_Get(); }
    void MSGPIAPI LedTypeSet(void*, int v) { usedLEDTypeProp_Set(v); }
+   int MSGPIAPI StrictNameGet(void*) { return strictFileNameProp_Get(); }
+   void MSGPIAPI StrictNameSet(void*, int v) { strictFileNameProp_Set(v); }
+
+   // B2S Pro loose backglass file matching ('strict file name match' turned off): the pair is conventionally
+   // named 'FlipperName (Company Year)', a table carrying extra text (version, mod, ...) is matched through its
+   // first closing parenthesis, so 'Big Guns (Williams 1987) Something Else' takes the backglass
+   // 'Big Guns (Williams 1987).B2SPro'. A name without parenthesis has the whole name as prefix, which is the
+   // exact match the lookup already tried
+   static string B2SFileNamePrefix(const string& name)
+   {
+      const size_t pos = name.find(')');
+      return pos == string::npos ? name : name.substr(0, pos + 1);
+   }
+
+   // The file of the folder whose stem starts with the prefix and carries the given extension, taking the one
+   // whose name is the closest to the prefix (the shortest, then alphabetically) so that a folder holding
+   // several variants resolves the same way at every load
+   static std::filesystem::path FindB2SFileLoose(const std::filesystem::path& dir, const string& prefix, const std::string_view extension)
+   {
+      const string prefixLc = string_to_lower(prefix);
+      const string extLc = string_to_lower(string(extension));
+      if (prefixLc.empty())
+         return {};
+
+      std::filesystem::path best;
+      size_t bestLen = 0;
+      string bestLc;
+      std::error_code ec;
+      for (const std::filesystem::directory_entry& entry : std::filesystem::directory_iterator(dir, ec))
+      {
+         const std::filesystem::path& file = entry.path();
+         if (ec)
+            break; // Unreadable folder
+         if (!entry.is_regular_file(ec) || string_to_lower(PluginStrings::PathToUTF8(file.extension())) != extLc)
+            continue;
+         const string stem = PluginStrings::PathToUTF8(file.stem());
+         const string stemLc = string_to_lower(stem);
+         if (stemLc.compare(0, prefixLc.size(), prefixLc) != 0)
+            continue;
+         if (best.empty() || stem.size() < bestLen || (stem.size() == bestLen && stemLc < bestLc))
+         {
+            best = file;
+            bestLen = stem.size();
+            bestLc = stemLc;
+         }
+      }
+      return best;
+   }
 
    void FillHeader(PagedUIItemDef& item, const char* label)
    {
@@ -74,7 +125,7 @@ namespace
       info->info = nullptr;
    }
 
-   unsigned int MSGPIAPI SettingsItemCount(void*, const char*) { return 10; }
+   unsigned int MSGPIAPI SettingsItemCount(void*, const char*) { return 11; }
 
    void MSGPIAPI SettingsGetItems(void*, const char*, PagedUIItemDef* items)
    {
@@ -89,6 +140,14 @@ namespace
       ledType.tooltip = "Force the LED display type (Auto = as declared by the .directb2s file)";
       ledType.storage = PAGEDUI_STORAGE_HOST;
       ledType.enumProp = { 0, 3, usedLEDTypeValues, 0, &LedTypeGet, &LedTypeSet };
+      PagedUIItemDef& strictName = items[pos++];
+      strictName = {};
+      strictName.type = PAGEDUI_ITEM_BOOL;
+      strictName.id = "StrictFileNameMatch";
+      strictName.label = "Strict file name match";
+      strictName.tooltip = "Require the backglass file to be named exactly after the table. Turned off, a table named 'Big Guns (Williams 1987) Something Else' also accepts the backglass named 'Big Guns (Williams 1987).B2SPro': the names are matched up to the closing parenthesis. A full name match always wins, whatever this is set to. Takes effect at the next table load";
+      strictName.storage = PAGEDUI_STORAGE_HOST;
+      strictName.boolProp = { 1, &StrictNameGet, &StrictNameSet };
       PagedUIItemDef& allSlowdown = items[pos++];
       allSlowdown = {};
       allSlowdown.type = PAGEDUI_ITEM_INT;
@@ -447,10 +506,13 @@ std::shared_ptr<B2STable> B2SServer::LoadB2SFile(const std::filesystem::path& pa
    return b2s;
 }
 
-// Backglass file lookup, in the order of the B2S Pro Server: the table name with .B2SPro, then with the legacy
-// .directb2s; only when neither exists, the name of the folder that holds the table (file layouts where the table
-// shares a folder with its companion files: b2s, pup, flex, music, ...) with .B2SPro, then .directb2s. The folder
-// name is a last resort so that it never takes the place of a file named after the table.
+// Backglass file lookup, in the order of the B2S Pro Server: the table name with .B2SPro, then with the
+// legacy .directb2s; only when neither exists, the name of the folder that holds the table (file layouts
+// where the table shares a folder with its companion files: b2s, pup, flex, music, ...) with .B2SPro, then
+// .directb2s. The folder name is a last resort so that it never takes the place of a file named after the
+// table. A full name match is always the first resort, whatever 'strict file name match' is set to: with the
+// setting turned off, a table without a full name match is matched through its first closing parenthesis, the
+// 'FlipperName (Company Year)' the backglass is conventionally named after.
 std::filesystem::path B2SServer::FindB2SFile() const
 {
    const std::filesystem::path dir = m_workingDir.empty() ? m_tableDir : m_workingDir;
@@ -463,6 +525,18 @@ std::filesystem::path B2SServer::FindB2SFile() const
       for (const std::string_view extension : { B2SProFileExtension, LegacyDirectB2SFileExtension })
          if (auto file = tryFile(name, extension); !file.empty())
             return file;
+
+   // Loose matching: a backglass named up to the closing parenthesis of the table name
+   if (!strictFileNameProp_Get())
+      for (const string& name : { m_tableName, PluginStrings::PathToUTF8(dir.filename()) })
+      {
+         const string prefix = B2SFileNamePrefix(name);
+         if (prefix == name)
+            continue; // The name has no parenthesis, so the loose matching is the exact one tried above
+         for (const std::string_view extension : { B2SProFileExtension, LegacyDirectB2SFileExtension })
+            if (auto file = FindB2SFileLoose(dir, prefix, extension); !file.empty())
+               return file;
+      }
 
    return {};
 }

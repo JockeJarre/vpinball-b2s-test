@@ -26,6 +26,12 @@ FEATURES:
   ratio': centered (default) puts the image in the middle of the window, turned off it sticks the image to the
   bottom of the window, the black area going on its top
 - B2S Pro: .B2SPro documents are edited and saved exactly like the legacy .directb2s ones
+- B2S Pro: new 'Strict file name match' setting (on by default). Turned off, a table with no backglass named
+  exactly after it is matched through its first closing parenthesis, the 'FlipperName (Company Year)' the
+  backglass is conventionally named after: 'Big Guns (Williams 1987) Something Else.vpx' takes the
+  'Big Guns (Williams 1987).B2SPro'. A full name match always wins, whatever the setting is set to; a folder
+  with several variants resolves to the name closest to the table (the shortest, then alphabetically). Takes
+  effect at the next table load
 - B2S Pro: the plugin is built under its own 'plugins/b2s-pro' plugin folder, with the 'B2SPro' plugin id and the
   'plugin-b2spro' / 'plugin-b2spro64' libraries, so that it can be installed next to the stock B2S plugin without
   replacing it
