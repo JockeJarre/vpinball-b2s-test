@@ -39,6 +39,11 @@ jobs:
   build:
     name: B2S plugin ${{ matrix.platform }}-${{ matrix.arch }}
     runs-on: windows-latest
+    env:
+      # Single source of truth for the zip, artifact and upload path names (a mismatch between
+      # the zip written by 'Package the plugin' and the upload 'path' silently uploads nothing,
+      # since a missing path is only a warning)
+      PKG_NAME: b2s-pro-${{ matrix.platform }}-${{ matrix.arch }}-${{ inputs.config || 'Release' }}
     strategy:
       fail-fast: false
       matrix:
@@ -100,9 +105,12 @@ jobs:
             cp build/plugins/b2s-pro/"${{ inputs.config || 'Release' }}"/*.dll staging/b2s-pro/
           fi
           cd staging
-          7z a -tzip "../b2s-pro-${{ matrix.platform }}-${{ matrix.arch }}-${{ inputs.config || 'Release' }}.zip" b2s-pro
+          7z a -tzip "../${PKG_NAME}.zip" b2s-pro
+          # Fail loudly instead of uploading nothing when the package is missing/empty
+          test -s "../${PKG_NAME}.zip"
       - uses: actions/upload-artifact@v7
         with:
-          name: b2s-pro-${{ matrix.platform }}-${{ matrix.arch }}-${{ inputs.config || 'Release' }}
-          path: b2s-plugin-${{ matrix.platform }}-${{ matrix.arch }}-${{ inputs.config || 'Release' }}.zip
+          name: ${{ env.PKG_NAME }}
+          path: ${{ env.PKG_NAME }}.zip
           archive: false
+          if-no-files-found: error
