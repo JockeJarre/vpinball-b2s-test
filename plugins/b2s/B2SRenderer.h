@@ -74,6 +74,7 @@ private:
    void UpdateAnimations(vector<B2SAnimation>& animations, float elapsed, B2SServer* server, B2SDualMode dualMode);
    void FitSurfaceToWindow(VPXRenderContext2D* ctx, float contentW, float contentH); // KeepAspectRatio: the drawing surface is padded to the window shape
    void RenderAspectPadding(VPXRenderContext2D* ctx); // KeepAspectRatio: black over the padding of the surface
+   float ContentY(float authoredY) const { return authoredY + m_layoutOY; } // KeepAspectRatio: authored surface Y of a content Y
    B2SDualMode ActiveDualMode() const;
    void OnRandomAnimationTrigger(vector<B2SAnimation>& animations, B2SRomIDType romIdType, int romId, bool start);
    void DispatchScriptTriggers(B2SServer* server);
@@ -203,6 +204,9 @@ private:
    float m_grillCut = 0.f;
    float m_padW = 0.f; // KeepAspectRatio: the padded surface dims, the authored content sits at its top left
    float m_padH = 0.f;
+   float m_contentW = 0.f; // KeepAspectRatio: the authored content drawn on the padded surface
+   float m_contentH = 0.f;
+   float m_layoutOY = 0.f; // KeepAspectRatio: vertical placement of the content on the surface (0 sticks it to the top)
 
    VPXTexture m_blackTexture = nullptr; // 1x1 opaque black, KeepAspectRatio borders
 };

@@ -140,7 +140,7 @@ void LEDBox::Render(VPXRenderContext2D* const ctx)
             ClearInvalidated();
          }
 
-         m_pGraphics->DrawToContext(ctx, GetLeft(), GetTop());
+         m_pGraphics->DrawToContext(ctx, GetLeft(), GetTop(), m_viewOY);
       }
    }
 }

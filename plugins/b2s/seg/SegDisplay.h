@@ -35,6 +35,8 @@ public:
    }
    bool IsVisible() const { return m_visible; }
    void SetVisible(bool visible) { m_visible = visible; }
+   // KeepAspectRatio: vertical placement of the display on the padded drawing surface
+   void SetViewOY(const float oy) { m_viewOY = oy; }
    uint32_t GetBackColor() const { return m_backColor; }
    void SetBackColor(uint32_t backColor) { m_backColor = backColor; }
    void Invalidate() { m_invalidated = true; }
@@ -42,6 +44,7 @@ public:
    bool IsHandleCreated() const { return m_handleCreated; }
 
 protected:
+   float m_viewOY = 0.f; // KeepAspectRatio vertical placement, taken by the derived Render
    void ClearInvalidated() { m_invalidated = false; }
    virtual void OnHandleCreated() { }
    virtual void OnResize() { }

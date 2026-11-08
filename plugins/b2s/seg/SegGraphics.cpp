@@ -553,12 +553,12 @@ void SegGraphics::SyncTexture()
    m_needsTextureUpdate = false;
 }
 
-void SegGraphics::DrawToContext(VPXRenderContext2D* ctx, int left, int top)
+void SegGraphics::DrawToContext(VPXRenderContext2D* ctx, int left, int top, const float oy)
 {
    VPXTexture texture = GetTexture();
    if (texture && ctx->DrawImage)
    {
-      ctx->DrawImage(ctx, texture, 1.0f, 1.0f, 1.0f, 1.0f, 0, 0, (float)m_width, (float)m_height, 0, 0, 0, (float)left, (float)top, (float)m_width, (float)m_height);
+      ctx->DrawImage(ctx, texture, 1.0f, 1.0f, 1.0f, 1.0f, 0, 0, (float)m_width, (float)m_height, 0, 0, 0, (float)left, (float)top + oy, (float)m_width, (float)m_height);
    }
 }
 

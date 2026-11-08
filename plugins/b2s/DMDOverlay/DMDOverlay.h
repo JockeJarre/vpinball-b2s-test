@@ -119,6 +119,8 @@ public:
    // position' bounds search against 'artwork' (nullptr disables it), maps the document
    // bounds through Doc::mapQuad and draws the glass and emitter layers
    void Render(VPXRenderContext2D* context, Display& display, VPXTexture artwork);
+   // KeepAspectRatio: vertical placement of the display on the padded drawing surface
+   void SetViewOY(const float oy) { m_viewOY = oy; }
 
 private:
    vec4<int> SearchDmdSubFrame(VPXTexture image, const VPXTextureInfo* const texInfo, float dmdAspectRatio, const LogFn& log) const;
@@ -135,6 +137,7 @@ private:
    size_t m_glassHash = 0;
 
    bool m_stopSearching = false;
+   float m_viewOY = 0.f; // KeepAspectRatio vertical placement of the render quad
    std::future<vec4<int>> m_frameSearch;
 
    // Identity of the frame last uploaded to the texture, to avoid a full copy plus a GPU re-upload every frame

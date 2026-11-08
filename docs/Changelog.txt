@@ -22,6 +22,9 @@ FEATURES:
   image keeps its shape, a round bulb stays round, nothing is cropped, and the padded area is left black. The
   content sits at the top left of the window, the black area falls on its right and/or bottom side. Turn it off
   to stretch the images over the whole window
+- B2S plugin: add a 'Center vertically' setting (plugin settings page) for the black area left by 'Keep aspect
+  ratio': centered (default) puts the image in the middle of the window, turned off it sticks the image to the
+  bottom of the window, the black area going on its top
 - B2S Pro: .B2SPro documents are edited and saved exactly like the legacy .directb2s ones
 - B2S Pro: the plugin is built under its own 'plugins/b2s-pro' plugin folder, with the 'B2SPro' plugin id and the
   'plugin-b2spro' / 'plugin-b2spro64' libraries, so that it can be installed next to the stock B2S plugin without
