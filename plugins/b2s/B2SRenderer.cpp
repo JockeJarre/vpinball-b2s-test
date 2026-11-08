@@ -20,6 +20,8 @@ static inline float InvsRGB(const float x) { return (x <= 0.04045f) ? (x * (floa
 MSGPI_BOOL_VAL_SETTING(showGrillProp, "ShowGrill", "Show Grill", "Show Grill", true, false);
 MSGPI_BOOL_VAL_SETTING(upgradedSegRenderingProp, "UpgradedSegmentRendering", "Upgraded segment rendering",
    "Render LED score displays with the upgraded segment renderer (turn off for the original B2S segment rendering)", true, true);
+MSGPI_BOOL_VAL_SETTING(keepAspectRatioProp, "KeepAspectRatio", "Keep aspect ratio",
+   "Keep the aspect ratio of the backglass and score view images, filling the rest of the window with black borders (turn off to stretch the images over the whole window)", true, false);
 
 static const char* dualModeValues[] = { "Authentic", "Fantasy" };
 MSGPI_ENUM_VAL_SETTING(dualModeProp, "DualMode", "Dual Mode", "Active mode for dual backglasses (authentic or fantasy)", true, 1, 2, dualModeValues, 1);
@@ -171,6 +173,7 @@ void B2SRenderer::RegisterSettings(const MsgPluginAPI* const msgApi, unsigned in
    msgApi->RegisterSetting(endpointId, &showGrillProp);
    msgApi->RegisterSetting(endpointId, &dualModeProp);
    msgApi->RegisterSetting(endpointId, &upgradedSegRenderingProp);
+   msgApi->RegisterSetting(endpointId, &keepAspectRatioProp);
 }
 
 namespace
@@ -181,6 +184,8 @@ namespace
    void MSGPIAPI DualModeSet(void*, int v) { dualModeProp_Set(v); }
    int MSGPIAPI UpgradedSegGet(void*) { return upgradedSegRenderingProp_Get(); }
    void MSGPIAPI UpgradedSegSet(void*, int v) { upgradedSegRenderingProp_Set(v); }
+   int MSGPIAPI KeepAspectRatioGet(void*) { return keepAspectRatioProp_Get(); }
+   void MSGPIAPI KeepAspectRatioSet(void*, int v) { keepAspectRatioProp_Set(v); }
 }
 
 int B2SRenderer::FillSettingsItems(PagedUIItemDef* items)
@@ -206,7 +211,57 @@ int B2SRenderer::FillSettingsItems(PagedUIItemDef* items)
    items[2].tooltip = "Render LED score displays with the upgraded segment renderer (turn off for the original B2S segment rendering)";
    items[2].storage = PAGEDUI_STORAGE_HOST;
    items[2].boolProp = { 1, &UpgradedSegGet, &UpgradedSegSet };
-   return 3;
+   items[3] = {};
+   items[3].type = PAGEDUI_ITEM_BOOL;
+   items[3].id = "KeepAspectRatio";
+   items[3].label = "Keep aspect ratio";
+   items[3].tooltip = "Keep the aspect ratio of the backglass and score view images, filling the rest of the window with black borders (turn off to stretch the images over the whole window)";
+   items[3].storage = PAGEDUI_STORAGE_HOST;
+   items[3].boolProp = { 0, &KeepAspectRatioGet, &KeepAspectRatioSet };
+   return 4;
+}
+
+// KeepAspectRatio rendering: the host stretches the source surface over the whole window, so keeping the
+// image aspect ratio means covering the area outside the centered image rectangle with opaque black bars.
+// The bars are drawn in source space over the full drawing extent, hence they also mask the illuminations,
+// scores and DMD overlays which are authored in the image coordinate space
+void B2SRenderer::RenderAspectBars(VPXRenderContext2D* ctx)
+{
+   if (m_blackTexture == nullptr)
+   {
+      static const uint8_t black[4] = { 0, 0, 0, 255 };
+      m_vpxApi->UpdateTexture(&m_blackTexture, 1, 1, VPXTextureFormat::VPXTEXFMT_sRGBA8, black);
+      if (m_blackTexture == nullptr)
+         return; // Texture upload failed, keep stretching
+   }
+
+   const float wndAspect = (ctx->outHeight > 0.f) ? ctx->outWidth / ctx->outHeight : 1.f;
+   const float srcAspect = (ctx->srcHeight > 0.f) ? ctx->srcWidth / ctx->srcHeight : 1.f;
+   if (fabsf(wndAspect - srcAspect) < 1e-4f)
+      return; // Matching aspects, no border to draw
+
+   const auto drawBar = [this, ctx](const float x, const float y, const float w, const float h)
+   {
+      ctx->DrawImage(ctx, m_blackTexture, 0.f, 0.f, 0.f, 1.f, // Opaque black
+         0.f, 0.f, 1.f, 1.f, // The 1x1 texture, fully sampled
+         0.f, 0.f, 0.f, // No pivot, no rotation
+         x, y, w, h);
+   };
+
+   if (srcAspect < wndAspect)
+   {
+      // The source is narrower than the window: pillarbox, bars on the left and right
+      const float barW = 0.5f * ctx->srcWidth * (1.f - srcAspect / wndAspect);
+      drawBar(0.f, 0.f, barW, ctx->srcHeight);
+      drawBar(ctx->srcWidth - barW, 0.f, barW, ctx->srcHeight);
+   }
+   else
+   {
+      // The source is wider than the window: letterbox, bars on the top and bottom
+      const float barH = 0.5f * ctx->srcHeight * (1.f - wndAspect / srcAspect);
+      drawBar(0.f, 0.f, ctx->srcWidth, barH);
+      drawBar(0.f, ctx->srcHeight - barH, ctx->srcWidth, barH);
+   }
 }
 
 void B2SRenderer::OnStateSrcChanged(const std::vector<StateSrcId>& items)
@@ -2069,6 +2124,9 @@ bool B2SRenderer::RenderBackglass(VPXRenderContext2D* ctx, B2SServer* server)
                                                                 : m_b2s->m_backglassOnImage.m_image;
    RenderDisplays(ctx, server, 0, backImage);
 
+   if (keepAspectRatioProp_Get())
+      RenderAspectBars(ctx);
+
    return true;
 }
 
@@ -2135,6 +2193,9 @@ bool B2SRenderer::RenderScoreView(VPXRenderContext2D* ctx, B2SServer* server)
    RenderBulbs(ctx, server, m_b2s->m_dmdIlluminations, elapsed, B2SDualMode::Both, false); // Reference does not dual-filter score view bulbs
    RenderScores(ctx, server, m_b2s->m_dmdScores, elapsed);
    RenderDisplays(ctx, server, 1, m_b2s->m_dmdImage.m_image);
+
+   if (keepAspectRatioProp_Get())
+      RenderAspectBars(ctx);
 
    return true;
 }
