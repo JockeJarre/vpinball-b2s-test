@@ -40,14 +40,6 @@ public:
 
    bool Render(VPXRenderContext2D* context, class B2SServer* server);
 
-   // Fit transform of the current view (see SetViewTransform). Every source rectangle of a drawing call goes
-   // through it: x' = m_ox + x * m_rx, y' = m_oy + y * m_ry. It is the identity when KeepAspectRatio is off
-   struct ViewTransform
-   {
-      float m_ox = 0.f, m_oy = 0.f; // translation, in source units
-      float m_rx = 1.f, m_ry = 1.f; // scale, source units per source unit of the unstretched view
-   };
-
 private:
    std::function<void()> ResolveRomPropUpdater(const std::vector<StateSrcId>& items, float* value, const B2SRomIDType romIdType, const int romId, const bool romInverted = false, const int romValue = 0, const bool holdSwitchOn = false) const;
    bool RenderBackglass(VPXRenderContext2D* context, class B2SServer* server);
@@ -80,11 +72,8 @@ private:
    void RenderLegacyScoreDisplay(VPXRenderContext2D* ctx, B2SServer* server, const B2SScore& reel, bool dream7, const std::vector<SegElementType>& segTypes,
       const ankerl::unordered_dense::map<int, string>& playerScoreText, bool fromDigits);
    void UpdateAnimations(vector<B2SAnimation>& animations, float elapsed, B2SServer* server, B2SDualMode dualMode);
-   void RenderAspectBars(VPXRenderContext2D* ctx); // Black borders in the area left over by the fit transform (kept clear by it)
-   // Fit the whole view into the window without distorting it: the authored surface (refWidth x refHeight, in the
-   // source units of the view) is scaled uniformly to the largest rectangle of that shape that fits the window,
-   // centered, and the drawing is transformed into it, so nothing is cut and the leftover is left to the borders
-   void SetViewTransform(VPXRenderContext2D* ctx, float refWidth, float refHeight);
+   void FitSurfaceToWindow(VPXRenderContext2D* ctx, float contentW, float contentH); // KeepAspectRatio: the drawing surface is padded to the window shape
+   void RenderAspectPadding(VPXRenderContext2D* ctx); // KeepAspectRatio: black over the padding of the surface
    B2SDualMode ActiveDualMode() const;
    void OnRandomAnimationTrigger(vector<B2SAnimation>& animations, B2SRomIDType romIdType, int romId, bool start);
    void DispatchScriptTriggers(B2SServer* server);
@@ -121,12 +110,6 @@ private:
    std::map<const B2SScore*, LegacySegDisplay> m_legacySegDisplays;
 
    VPXTexture m_canvasBackingTex = nullptr; // B2S Pro canvas backing color (1x1), created on first use
-
-   ViewTransform m_xf; // Transform of the view being rendered, applied by the drawing helpers
-   float m_xfSx = 1.f; // Window pixels per authored pixel of the transformed view (x), what the motion, physics and grid scales take
-   float m_xfSy = 1.f; // Idem (y)
-   float m_xfBarX = 0.f; // Border width per side, in source units (0 when the window is the narrow side or the feature is off)
-   float m_xfBarY = 0.f; // Border height per side, in source units
 
    // B2S Pro motion paths
    struct MotionProbe
@@ -218,6 +201,8 @@ private:
    float m_dmdWidth = 0.f;
    float m_dmdHeight = 0.f;
    float m_grillCut = 0.f;
+   float m_padW = 0.f; // KeepAspectRatio: the padded surface dims, the authored content sits at its top left
+   float m_padH = 0.f;
 
    VPXTexture m_blackTexture = nullptr; // 1x1 opaque black, KeepAspectRatio borders
 };

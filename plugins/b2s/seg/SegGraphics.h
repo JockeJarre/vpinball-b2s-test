@@ -37,7 +37,7 @@ public:
    void SetTransform(const Matrix& pModelMatrix);
    VPXTexture GetTexture();
    void SyncTexture();
-   void DrawToContext(VPXRenderContext2D* ctx, int left, int top, float ox = 0.f, float oy = 0.f, float rx = 1.f, float ry = 1.f);
+   void DrawToContext(VPXRenderContext2D* ctx, int left, int top);
    int GetWidth() const { return m_width; }
    int GetHeight() const { return m_height; }
 

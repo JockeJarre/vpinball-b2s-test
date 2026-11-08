@@ -119,14 +119,9 @@ public:
    // position' bounds search against 'artwork' (nullptr disables it), maps the document
    // bounds through Doc::mapQuad and draws the glass and emitter layers
    void Render(VPXRenderContext2D* context, Display& display, VPXTexture artwork);
-   // KeepAspectRatio fit transform of the window the display is rendered to (see B2SRenderer::SetViewTransform),
-   // translation in the source units of that window, scale applied to them: the dot matrix follows the artwork it is authored on
-   void SetViewTransform(const float ox, const float oy, const float rx, const float ry) { m_viewOX = ox; m_viewOY = oy; m_viewRX = rx; m_viewRY = ry; }
 
 private:
    vec4<int> SearchDmdSubFrame(VPXTexture image, const VPXTextureInfo* const texInfo, float dmdAspectRatio, const LogFn& log) const;
-
-   float m_viewOX = 0.f, m_viewOY = 0.f, m_viewRX = 1.f, m_viewRY = 1.f; // Fit transform set by the renderer on each render
 
    PinballPlugin::ResURIResolver& m_resURIResolver;
    // Source frame texture owned by the overlay: as only new frames are uploaded, it can not be shared

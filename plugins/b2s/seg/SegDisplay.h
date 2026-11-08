@@ -40,12 +40,6 @@ public:
    void Invalidate() { m_invalidated = true; }
    bool IsInvalidated() const { return m_invalidated; }
    bool IsHandleCreated() const { return m_handleCreated; }
-   // KeepAspectRatio fit transform of the window the control is rendered to (see B2SRenderer::SetViewTransform),
-   // translation in the source units of that window, scale applied to them, set by the owner on each render
-   void SetViewTransform(const float ox, const float oy, const float rx, const float ry) { m_viewOX = ox; m_viewOY = oy; m_viewRX = rx; m_viewRY = ry; }
-
-protected:
-   float m_viewOX = 0.f, m_viewOY = 0.f, m_viewRX = 1.f, m_viewRY = 1.f;
 
 protected:
    void ClearInvalidated() { m_invalidated = false; }
