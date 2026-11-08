@@ -10,6 +10,10 @@
     <ClCompile Include="../../plugins/b2s/B2SDataModel.cpp" />
     <ClCompile Include="../../plugins/b2s/B2SRenderer.cpp" />
     <ClCompile Include="../../plugins/b2s/B2SServer.cpp" />
+    <ClCompile Include="../../plugins/b2s/DynamicLight.cpp" />
+    <ClCompile Include="../../plugins/b2s/Motion.cpp" />
+    <ClCompile Include="../../plugins/b2s/Physics.cpp" />
+    <ClCompile Include="../../plugins/b2s/Reel3D.cpp" />
     <ClCompile Include="../../plugins/b2s/DMDOverlay/DMDOverlay.cpp" />
     <ClCompile Include="../../plugins/b2s/seg/Dream7Display.cpp" />
     <ClCompile Include="../../plugins/b2s/seg/GraphicsPath.cpp" />
@@ -27,6 +31,10 @@
     <ClInclude Include="../../plugins/b2s/B2SDataModel.h" />
     <ClInclude Include="../../plugins/b2s/B2SRenderer.h" />
     <ClInclude Include="../../plugins/b2s/B2SServer.h" />
+    <ClInclude Include="../../plugins/b2s/DynamicLight.h" />
+    <ClInclude Include="../../plugins/b2s/Motion.h" />
+    <ClInclude Include="../../plugins/b2s/Physics.h" />
+    <ClInclude Include="../../plugins/b2s/Reel3D.h" />
     <ClInclude Include="../../plugins/b2s/DMDOverlay/DMDOverlay.h" />
     <ClInclude Include="../../plugins/nixie/NixieLayoutFile.h" />
     <ClInclude Include="../../plugins/b2s/DMDOverlay/OverlayDisplayOptions.h" />
@@ -52,17 +60,17 @@
   <ItemDefinitionGroup>
     <PostBuildEvent>
       <Command>
-        if not exist "$(SolutionDir)..\bin\vpx\$(VpxBaseConfig)_BGFX-$(Platform)\plugins\b2s\" md "$(SolutionDir)..\bin\vpx\$(VpxBaseConfig)_BGFX-$(Platform)\plugins\b2s\"
-        copy "$(TargetPath)" "$(SolutionDir)..\bin\vpx\$(VpxBaseConfig)_BGFX-$(Platform)\plugins\b2s\"
-        copy "$(TargetDir)plugin.cfg" "$(SolutionDir)..\bin\vpx\$(VpxBaseConfig)_BGFX-$(Platform)\plugins\b2s\"
+        if not exist "$(SolutionDir)..\bin\vpx\$(VpxBaseConfig)_BGFX-$(Platform)\plugins\b2s-pro\" md "$(SolutionDir)..\bin\vpx\$(VpxBaseConfig)_BGFX-$(Platform)\plugins\b2s-pro\"
+        copy "$(TargetPath)" "$(SolutionDir)..\bin\vpx\$(VpxBaseConfig)_BGFX-$(Platform)\plugins\b2s-pro\"
+        copy "$(TargetDir)plugin.cfg" "$(SolutionDir)..\bin\vpx\$(VpxBaseConfig)_BGFX-$(Platform)\plugins\b2s-pro\"
 
-        if not exist "$(SolutionDir)..\bin\vpx\$(VpxBaseConfig)_GL-$(Platform)\plugins\b2s\" md "$(SolutionDir)..\bin\vpx\$(VpxBaseConfig)_GL-$(Platform)\plugins\b2s\"
-        copy "$(TargetPath)" "$(SolutionDir)..\bin\vpx\$(VpxBaseConfig)_GL-$(Platform)\plugins\b2s\"
-        copy "$(TargetDir)plugin.cfg" "$(SolutionDir)..\bin\vpx\$(VpxBaseConfig)_GL-$(Platform)\plugins\b2s\"
+        if not exist "$(SolutionDir)..\bin\vpx\$(VpxBaseConfig)_GL-$(Platform)\plugins\b2s-pro\" md "$(SolutionDir)..\bin\vpx\$(VpxBaseConfig)_GL-$(Platform)\plugins\b2s-pro\"
+        copy "$(TargetPath)" "$(SolutionDir)..\bin\vpx\$(VpxBaseConfig)_GL-$(Platform)\plugins\b2s-pro\"
+        copy "$(TargetDir)plugin.cfg" "$(SolutionDir)..\bin\vpx\$(VpxBaseConfig)_GL-$(Platform)\plugins\b2s-pro\"
 
-        if not exist "$(SolutionDir)..\bin\vpx\$(VpxBaseConfig)-$(Platform)\plugins\b2s\" md "$(SolutionDir)..\bin\vpx\$(VpxBaseConfig)-$(Platform)\plugins\b2s\"
-        copy "$(TargetPath)" "$(SolutionDir)..\bin\vpx\$(VpxBaseConfig)-$(Platform)\plugins\b2s\"
-        copy "$(TargetDir)plugin.cfg" "$(SolutionDir)..\bin\vpx\$(VpxBaseConfig)-$(Platform)\plugins\b2s\"
+        if not exist "$(SolutionDir)..\bin\vpx\$(VpxBaseConfig)-$(Platform)\plugins\b2s-pro\" md "$(SolutionDir)..\bin\vpx\$(VpxBaseConfig)-$(Platform)\plugins\b2s-pro\"
+        copy "$(TargetPath)" "$(SolutionDir)..\bin\vpx\$(VpxBaseConfig)-$(Platform)\plugins\b2s-pro\"
+        copy "$(TargetDir)plugin.cfg" "$(SolutionDir)..\bin\vpx\$(VpxBaseConfig)-$(Platform)\plugins\b2s-pro\"
       </Command>
     </PostBuildEvent>
     <ClCompile>
@@ -76,7 +84,7 @@
     <VCProjectVersion>17.0</VCProjectVersion>
     <Keyword>Win32Proj</Keyword>
     <ProjectGuid>{7D58C20E-53F4-4AD6-9004-CA6148082491}</ProjectGuid>
-    <RootNamespace>plugin-b2s</RootNamespace>
+    <RootNamespace>plugin-b2spro</RootNamespace>
     <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
   </PropertyGroup>
 

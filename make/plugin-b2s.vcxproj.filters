@@ -22,6 +22,18 @@
     <ClCompile Include="../../plugins/b2s/B2SServer.cpp">
       <Filter>source</Filter>
     </ClCompile>
+    <ClCompile Include="../../plugins/b2s/DynamicLight.cpp">
+      <Filter>source</Filter>
+    </ClCompile>
+    <ClCompile Include="../../plugins/b2s/Motion.cpp">
+      <Filter>source</Filter>
+    </ClCompile>
+    <ClCompile Include="../../plugins/b2s/Physics.cpp">
+      <Filter>source</Filter>
+    </ClCompile>
+    <ClCompile Include="../../plugins/b2s/Reel3D.cpp">
+      <Filter>source</Filter>
+    </ClCompile>
     <ClCompile Include="../../plugins/b2s/DMDOverlay/DMDOverlay.cpp">
       <Filter>source\DMDOverlay</Filter>
     </ClCompile>

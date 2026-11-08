@@ -17,6 +17,14 @@ set(B2S_PLUGIN_SOURCES
    plugins/b2s/B2SRenderer.cpp
    plugins/b2s/B2SServer.h
    plugins/b2s/B2SServer.cpp
+   plugins/b2s/DynamicLight.h
+   plugins/b2s/DynamicLight.cpp
+   plugins/b2s/Motion.h
+   plugins/b2s/Motion.cpp
+   plugins/b2s/Physics.h
+   plugins/b2s/Physics.cpp
+   plugins/b2s/Reel3D.h
+   plugins/b2s/Reel3D.cpp
    plugins/b2s/DMDOverlay/DMDOverlay.h
    plugins/b2s/DMDOverlay/DMDOverlay.cpp
    plugins/b2s/DMDOverlay/OverlayDisplayOptions.h
