@@ -256,16 +256,20 @@ void B2SRenderer::FitSurfaceToWindow(VPXRenderContext2D* ctx, const float conten
    // Vertical placement of the content in the surface: centered, or stuck on the floor. The content is drawn
    // from the top of the surface, so the placement is the black area taken above it
    m_layoutOY = centerVerticallyProp_Get() ? 0.5f * (m_padH - contentH) : m_padH - contentH;
+   // Horizontal placement is centered, there is nothing to choose: the image is centered on its axis of
+   // authoring, the only case where a horizontal black area shows is a window wider than the image
+   m_layoutOX = 0.5f * (m_padW - contentW);
 }
 
 // The padding is painted over once the frame is drawn: animations, illuminations and score displays are
 // authored on the image and may spill in the area kept for the borders
 void B2SRenderer::RenderAspectPadding(VPXRenderContext2D* ctx)
 {
-   const float right = ctx->srcWidth - m_padW;
+   const float left = m_layoutOX;
    const float top = m_layoutOY;
    const float bottom = m_padH - m_layoutOY - m_contentH;
-   if (right <= 0.f && top <= 0.f && bottom <= 0.f)
+   const float right = m_padW - m_layoutOX - m_contentW;
+   if (left <= 0.f && right <= 0.f && top <= 0.f && bottom <= 0.f)
       return;
 
    if (m_blackTexture == nullptr)
@@ -288,8 +292,10 @@ void B2SRenderer::RenderAspectPadding(VPXRenderContext2D* ctx)
       drawBar(0.f, 0.f, ctx->srcWidth, top);
    if (bottom > 0.f)
       drawBar(0.f, m_layoutOY + m_contentH, ctx->srcWidth, bottom);
+   if (left > 0.f)
+      drawBar(0.f, m_layoutOY, left, m_contentH);
    if (right > 0.f)
-      drawBar(m_padW, 0.f, right, ctx->srcHeight);
+      drawBar(m_layoutOX + m_contentW, m_layoutOY, right, m_contentH);
 }
 
 void B2SRenderer::OnStateSrcChanged(const std::vector<StateSrcId>& items)
@@ -707,8 +713,8 @@ void B2SRenderer::RenderPhysicsBall(VPXRenderContext2D* ctx, const B2SServer* se
       frame.valid = true;
    }
    if (frame.texture != nullptr)
-      ctx->DrawImage(ctx, frame.texture, 1.f, 1.f, 1.f, 1.f, 0.f, 0.f, static_cast<float>(frame.w), static_cast<float>(frame.h), 0.f, 0.f, 0.f, static_cast<float>(frame.left),
-         ContentY(static_cast<float>(frame.top)), static_cast<float>(frame.w), static_cast<float>(frame.h));
+      ctx->DrawImage(ctx, frame.texture, 1.f, 1.f, 1.f, 1.f, 0.f, 0.f, static_cast<float>(frame.w), static_cast<float>(frame.h), 0.f, 0.f, 0.f, ContentX(static_cast<float>(frame.left)), ContentY(static_cast<float>(frame.top)), static_cast<float>(frame.w),
+         static_cast<float>(frame.h));
 }
 
 void B2SRenderer::UpdateAnimations(vector<B2SAnimation>& animations, float elapsed, B2SServer* server, B2SDualMode dualMode)
@@ -855,12 +861,12 @@ void B2SRenderer::OnRandomAnimationTrigger(vector<B2SAnimation>& animations, B2S
 }
 
 static void UpdatePivotMove(B2SBulb& bulb, std::chrono::steady_clock::time_point now, uint64_t nextLegStamp);
-static void DrawRotatedBulb(VPXRenderContext2D* ctx, const B2SBulb& bulb, float alpha, float offsetY);
+static void DrawRotatedBulb(VPXRenderContext2D* ctx, const B2SBulb& bulb, float alpha, float offsetX, float offsetY);
 
 // B2S Pro motion path: the image of imageOwner (the trough swaps images between its members) drawn with its centre at the
 // given authored position, rolled about its centre by the angle (clockwise positive), untinted. The rectangle is the bulb's own;
 // its alpha crop only applies to its own image. VPX measures the texture rectangle from the bottom of the texture
-static void DrawMotionImage(VPXRenderContext2D* ctx, const B2SBulb& imageOwner, const B2SBulb& shape, Motion::Vec center, Motion::Vec size, double roll, float alpha, const float offsetY)
+static void DrawMotionImage(VPXRenderContext2D* ctx, const B2SBulb& imageOwner, const B2SBulb& shape, Motion::Vec center, Motion::Vec size, double roll, float alpha, const float offsetX, const float offsetY)
 {
    if (imageOwner.m_image == nullptr || alpha <= 0.f || size.x <= 0.0 || size.y <= 0.0)
       return;
@@ -877,7 +883,7 @@ static void DrawMotionImage(VPXRenderContext2D* ctx, const B2SBulb& imageOwner, 
    }
    const float texY = static_cast<float>(info->height) - texTop - texH;
    ctx->DrawImage(ctx, imageOwner.m_image, 1.f, 1.f, 1.f, alpha, texX, texY, texW, texH, texX + texW * 0.5f, texY + texH * 0.5f, static_cast<float>(roll),
-      static_cast<float>(center.x - size.x * 0.5), static_cast<float>(center.y - size.y * 0.5) + offsetY, static_cast<float>(size.x), static_cast<float>(size.y));
+      static_cast<float>(center.x - size.x * 0.5) + offsetX, static_cast<float>(center.y - size.y * 0.5) + offsetY, static_cast<float>(size.x), static_cast<float>(size.y));
 }
 
 // The persistent source of a sequence anchor comes first, at the anchor's own place in the draw order, even while the anchor is hidden
@@ -885,12 +891,12 @@ void B2SRenderer::RenderMotionBulb(VPXRenderContext2D* ctx, const B2SBulb& bulb,
 {
    const Motion::System::Feeder feeder = m_motion->GetFeeder(bulb.m_motionIndex, alpha > 0.f);
    if (feeder.draw && feeder.image >= 0 && static_cast<size_t>(feeder.image) < m_motionBulbs.size())
-      DrawMotionImage(ctx, *m_motionBulbs[static_cast<size_t>(feeder.image)], bulb, feeder.center, feeder.size, feeder.roll, 1.f, m_layoutOY);
+      DrawMotionImage(ctx, *m_motionBulbs[static_cast<size_t>(feeder.image)], bulb, feeder.center, feeder.size, feeder.roll, 1.f, m_layoutOX, m_layoutOY);
    if (alpha > 0.f)
    {
       const Motion::System::View view = m_motion->GetView(bulb.m_motionIndex);
       if (view.image >= 0 && static_cast<size_t>(view.image) < m_motionBulbs.size())
-         DrawMotionImage(ctx, *m_motionBulbs[static_cast<size_t>(view.image)], bulb, view.center, view.size, view.roll, alpha, m_layoutOY);
+         DrawMotionImage(ctx, *m_motionBulbs[static_cast<size_t>(view.image)], bulb, view.center, view.size, view.roll, alpha, m_layoutOX, m_layoutOY);
    }
 }
 
@@ -1054,7 +1060,7 @@ void B2SRenderer::RenderBulbs(VPXRenderContext2D* ctx, const B2SServer* server, 
       {
          // B2S Pro external pivot representative: turned by named commands, drawn rotated about its hinge
          UpdatePivotMove(*bulb, std::chrono::steady_clock::now(), 0);
-         DrawRotatedBulb(ctx, *bulb, brightness, m_layoutOY);
+         DrawRotatedBulb(ctx, *bulb, brightness, m_layoutOX, m_layoutOY);
          NoteSnippetDrawn(*bulb, brightness, true);
          continue;
       }
@@ -1065,7 +1071,7 @@ void B2SRenderer::RenderBulbs(VPXRenderContext2D* ctx, const B2SServer* server, 
          ctx->DrawImage(ctx, bulb->m_offImage, 1.f, 1.f, 1.f, 1.f,
             0.f, 0.f, static_cast<float>(bulbTex->width), static_cast<float>(bulbTex->height),
             static_cast<float>(bulbTex->width) * 0.5f, static_cast<float>(bulbTex->height) * 0.5f, rotation,
-            static_cast<float>(bulb->m_locationX) + bulb->m_gridOffsetX, static_cast<float>(bulb->m_locationY) + bulb->m_gridOffsetY + m_layoutOY, static_cast<float>(bulb->m_width),
+            ContentX(static_cast<float>(bulb->m_locationX)) + bulb->m_gridOffsetX, static_cast<float>(bulb->m_locationY) + bulb->m_gridOffsetY + m_layoutOY, static_cast<float>(bulb->m_width),
             static_cast<float>(bulb->m_height));
       }
       if (bulb->m_image)
@@ -1074,7 +1080,7 @@ void B2SRenderer::RenderBulbs(VPXRenderContext2D* ctx, const B2SServer* server, 
          ctx->DrawImage(ctx, bulb->m_image, 1.f, 1.f, 1.f, brightness,
             0.f, 0.f, static_cast<float>(bulbTex->width), static_cast<float>(bulbTex->height),
             static_cast<float>(bulbTex->width) * 0.5f, static_cast<float>(bulbTex->height) * 0.5f, rotation,
-            static_cast<float>(bulb->m_locationX) + bulb->m_gridOffsetX, static_cast<float>(bulb->m_locationY) + bulb->m_gridOffsetY + m_layoutOY, static_cast<float>(bulb->m_width),
+            ContentX(static_cast<float>(bulb->m_locationX)) + bulb->m_gridOffsetX, static_cast<float>(bulb->m_locationY) + bulb->m_gridOffsetY + m_layoutOY, static_cast<float>(bulb->m_width),
             static_cast<float>(bulb->m_height));
       }
       if (m_b2s->m_hasDynamicFront)
@@ -1117,7 +1123,7 @@ static void UpdatePivotMove(B2SBulb& bulb, std::chrono::steady_clock::time_point
 
 // Draws a bulb rotated about its hinge, from its alpha-cropped area, untinted as in the reference (fB:879-906, fB:4417-4442).
 // The hinge of a bulb that is not a pivot animation is clamped to its rectangle (fB:3388-3389)
-static void DrawRotatedBulb(VPXRenderContext2D* ctx, const B2SBulb& bulb, float alpha, const float offsetY)
+static void DrawRotatedBulb(VPXRenderContext2D* ctx, const B2SBulb& bulb, float alpha, const float offsetX, const float offsetY)
 {
    if (alpha <= 0.f || bulb.m_image == nullptr || bulb.m_pivotTexW <= 0 || bulb.m_pivotTexH <= 0)
       return;
@@ -1130,7 +1136,7 @@ static void DrawRotatedBulb(VPXRenderContext2D* ctx, const B2SBulb& bulb, float 
    const float texW = static_cast<float>(bulb.m_pivotTexW), texH = static_cast<float>(bulb.m_pivotTexH);
    const float texY = info ? static_cast<float>(info->height) - static_cast<float>(bulb.m_pivotTexY) - texH : static_cast<float>(bulb.m_pivotTexY);
    ctx->DrawImage(ctx, bulb.m_image, 1.f, 1.f, 1.f, alpha, texX, texY, texW, texH, texX + texW * hingeX, texY + texH * hingeY, bulb.m_pivotAngle,
-      static_cast<float>(bulb.m_pivotDstX) + bulb.m_gridOffsetX, static_cast<float>(bulb.m_pivotDstY) + bulb.m_gridOffsetY + offsetY, static_cast<float>(bulb.m_pivotDstW),
+      static_cast<float>(bulb.m_pivotDstX) + bulb.m_gridOffsetX + offsetX, static_cast<float>(bulb.m_pivotDstY) + bulb.m_gridOffsetY + offsetY, static_cast<float>(bulb.m_pivotDstW),
       static_cast<float>(bulb.m_pivotDstH));
 }
 
@@ -1378,7 +1384,7 @@ void B2SRenderer::RenderNativeRotation(VPXRenderContext2D* ctx, const B2SServer*
       bulb.m_pulseWriteStamp = stamp;
       alpha = now < bulb.m_pulseEnd ? 1.f : 0.f;
    }
-   DrawRotatedBulb(ctx, bulb, alpha, m_layoutOY);
+   DrawRotatedBulb(ctx, bulb, alpha, m_layoutOX, m_layoutOY);
    NoteSnippetDrawn(bulb, alpha, true);
 }
 
@@ -1485,7 +1491,7 @@ void B2SRenderer::RenderPivot(VPXRenderContext2D* ctx, const B2SServer* server, 
       bulb.m_pulseWriteStamp = stamp;
       alpha = now < bulb.m_pulseEnd ? 1.f : 0.f;
    }
-   DrawRotatedBulb(ctx, bulb, alpha, m_layoutOY);
+   DrawRotatedBulb(ctx, bulb, alpha, m_layoutOX, m_layoutOY);
    NoteSnippetDrawn(bulb, alpha, true);
 }
 
@@ -1512,7 +1518,7 @@ void B2SRenderer::DrawLightImage(VPXRenderContext2D* ctx, const B2SBulb& light)
       return;
    const float texW = static_cast<float>(light.m_pivotTexW), texH = static_cast<float>(light.m_pivotTexH);
    const float texY = static_cast<float>(info->height) - static_cast<float>(light.m_pivotTexY) - texH; // VPX measures the rectangle from the bottom
-   ctx->DrawImage(ctx, light.m_image, 1.f, 1.f, 1.f, 1.f, static_cast<float>(light.m_pivotTexX), texY, texW, texH, 0.f, 0.f, 0.f, static_cast<float>(light.m_pivotDstX),
+   ctx->DrawImage(ctx, light.m_image, 1.f, 1.f, 1.f, 1.f, static_cast<float>(light.m_pivotTexX), texY, texW, texH, 0.f, 0.f, 0.f, ContentX(static_cast<float>(light.m_pivotDstX)),
       ContentY(static_cast<float>(light.m_pivotDstY)), texW, texH);
 }
 
@@ -1584,7 +1590,7 @@ void B2SRenderer::RenderDynamicLight(VPXRenderContext2D* ctx, B2SBulb& light, B2
          pair.valid = true;
       }
       if (!pair.empty && pair.texture != nullptr)
-         ctx->DrawImage(ctx, pair.texture, 1.f, 1.f, 1.f, 1.f, 0.f, 0.f, static_cast<float>(ow), static_cast<float>(oh), 0.f, 0.f, 0.f, static_cast<float>(ox), ContentY(static_cast<float>(oy)),
+         ctx->DrawImage(ctx, pair.texture, 1.f, 1.f, 1.f, 1.f, 0.f, 0.f, static_cast<float>(ow), static_cast<float>(oh), 0.f, 0.f, 0.f, ContentX(static_cast<float>(ox)), ContentY(static_cast<float>(oy)),
             static_cast<float>(ow), static_cast<float>(oh));
    }
 }
@@ -1600,11 +1606,12 @@ bool B2SRenderer::DrawBoxedReelDigit(VPXRenderContext2D* ctx, const B2SScore& re
    if (boxW <= 0 || boxH <= 0)
       return true; // The reference draws nothing in an empty box
    const int boxX = static_cast<int>(std::nearbyint(reel.m_locX - 1 + digitIndex * (boxW + reel.m_spacing / 2.0)));
+   const float x = ContentX(static_cast<float>(boxX));
    const float y = ContentY(static_cast<float>(reel.m_locY));
    const VPXTexture box = GetReelBoxTexture(image, boxW, boxH, reel, lit);
    if (box == nullptr)
       return false;
-   ctx->DrawImage(ctx, box, 1.f, 1.f, 1.f, 1.f, 0.f, 0.f, static_cast<float>(boxW), static_cast<float>(boxH), 0.f, 0.f, 0.f, static_cast<float>(boxX), y, static_cast<float>(boxW),
+   ctx->DrawImage(ctx, box, 1.f, 1.f, 1.f, 1.f, 0.f, 0.f, static_cast<float>(boxW), static_cast<float>(boxH), 0.f, 0.f, 0.f, x, y, static_cast<float>(boxW),
       static_cast<float>(boxH));
    if (reel.m_reel3DEnabled && reel.m_width > 2)
    {
@@ -1616,11 +1623,11 @@ bool B2SRenderer::DrawBoxedReelDigit(VPXRenderContext2D* ctx, const B2SScore& re
          const int sourceW = std::min(boxW, reel.m_width - sourceX);
          if (sourceW > 0)
             ctx->DrawImage(ctx, overlay, 1.f, 1.f, 1.f, 1.f, static_cast<float>(sourceX), 0.f, static_cast<float>(sourceW), static_cast<float>(boxH), 0.f, 0.f, 0.f,
-               static_cast<float>(boxX), y, static_cast<float>(sourceW), static_cast<float>(boxH));
+               x, y, static_cast<float>(sourceW), static_cast<float>(boxH));
       }
    }
    if (reel.m_behindCanvas)
-      DrawBackgroundPatch(ctx, static_cast<float>(boxX), y, static_cast<float>(boxW), static_cast<float>(boxH));
+      DrawBackgroundPatch(ctx, static_cast<float>(boxX), static_cast<float>(reel.m_locY), static_cast<float>(boxW), static_cast<float>(boxH));
    return true;
 }
 
@@ -1849,7 +1856,7 @@ void B2SRenderer::RenderScores(VPXRenderContext2D* ctx, B2SServer* server, const
                   ctx->DrawImage(ctx, img, 1.f, 1.f, 1.f, 1.f, //
                      0.f, 0.f, static_cast<float>(texInfo->width), static_cast<float>(texInfo->height), //
                      0.f, 0.f, 0.f, // No rotation
-                     x, ContentY(static_cast<float>(reel.m_locY)), width, static_cast<float>(reel.m_height));
+                     ContentX(x), ContentY(static_cast<float>(reel.m_locY)), width, static_cast<float>(reel.m_height));
                   // B2S Pro: a behind-canvas reel gets the matching patch of the background drawn over it, so the reel
                   // shows only through the canvas openings (reference B2SReelBox.vb:167-176)
                   if (reel.m_behindCanvas)
@@ -1912,7 +1919,7 @@ void B2SRenderer::RenderScores(VPXRenderContext2D* ctx, B2SServer* server, const
                litColor.x, litColor.y, litColor.z, 1.f, 1.f, // Emitter tint, emitter brightness, emitter alpha
                0.f, 0.f, 0.f, 0.f, // Emitter padding (from glass border)
                // Render quad
-               x, m_layoutOY + m_contentH - static_cast<float>(reel.m_locY + reel.m_height), width, static_cast<float>(reel.m_height));
+               ContentX(x), m_layoutOY + m_contentH - static_cast<float>(reel.m_locY + reel.m_height), width, static_cast<float>(reel.m_height));
          }
             break;
          }
@@ -2041,13 +2048,13 @@ void B2SRenderer::RenderLegacyScoreDisplay(VPXRenderContext2D* ctx, B2SServer* s
    }
    if (dream7)
    {
-      state.display->SetViewOY(m_layoutOY); // Placed with the KeepAspectRatio placement
+      state.display->SetViewOffset(m_layoutOX, m_layoutOY); // Placed with the KeepAspectRatio placement
       state.display->Render(ctx);
    }
    else
       for (auto& box : state.boxes)
       {
-         box->SetViewOY(m_layoutOY);
+         box->SetViewOffset(m_layoutOX, m_layoutOY);
          box->Render(ctx);
       }
 }
@@ -2128,7 +2135,7 @@ bool B2SRenderer::RenderBackglass(VPXRenderContext2D* ctx, B2SServer* server)
          const VPXTextureInfo* texInfo = GetTextureInfo(darkImage.m_image);
          ctx->DrawImage(ctx, darkImage.m_image, 1.f, 1.f, 1.f, 1.f, 0.f, m_grillCut, static_cast<float>(texInfo->width), static_cast<float>(texInfo->height) - m_grillCut, 0.f, 0.f,
             0.f, // No rotation
-            0.f, m_layoutOY, static_cast<float>(texInfo->width), static_cast<float>(texInfo->height) - m_grillCut);
+            ContentX(0.f), m_layoutOY, static_cast<float>(texInfo->width), static_cast<float>(texInfo->height) - m_grillCut);
       }
    }
    if (onImage.m_image)
@@ -2136,7 +2143,7 @@ bool B2SRenderer::RenderBackglass(VPXRenderContext2D* ctx, B2SServer* server)
       const VPXTextureInfo* texInfo = GetTextureInfo(onImage.m_image);
       ctx->DrawImage(ctx, onImage.m_image, 1.f, 1.f, 1.f, onImage.m_brightness, 0.f, m_grillCut, static_cast<float>(texInfo->width), static_cast<float>(texInfo->height) - m_grillCut, 0.f,
          0.f, 0.f, // No rotation
-         0.f, m_layoutOY, static_cast<float>(texInfo->width), static_cast<float>(texInfo->height) - m_grillCut);
+         ContentX(0.f), m_layoutOY, static_cast<float>(texInfo->width), static_cast<float>(texInfo->height) - m_grillCut);
    }
 
    // Draw illuminations, scores and DMD overlays. B2S Pro Dynamic Front Lighting: the lights' base images go right after the background, below
@@ -2168,7 +2175,7 @@ void B2SRenderer::DrawBackgroundPatch(VPXRenderContext2D* ctx, float x, float y,
    {
       if (m_b2s->m_dmdImage.m_image)
          if (const VPXTextureInfo* const info = GetTextureInfo(m_b2s->m_dmdImage.m_image))
-            ctx->DrawImage(ctx, m_b2s->m_dmdImage.m_image, 1.f, 1.f, 1.f, 1.f, x, static_cast<float>(info->height) - y - height, width, height, 0.f, 0.f, 0.f, x, ContentY(y), width, height);
+            ctx->DrawImage(ctx, m_b2s->m_dmdImage.m_image, 1.f, 1.f, 1.f, 1.f, x, static_cast<float>(info->height) - y - height, width, height, 0.f, 0.f, 0.f, ContentX(x), ContentY(y), width, height);
       return;
    }
    // The window shows the unlit (OffImage or backglass) image with the lit image blended over it, the hidden grill being
@@ -2179,7 +2186,7 @@ void B2SRenderer::DrawBackgroundPatch(VPXRenderContext2D* ctx, float x, float y,
       const VPXTextureInfo* const info = GetTextureInfo(texture);
       if (info == nullptr)
          return;
-      ctx->DrawImage(ctx, texture, 1.f, 1.f, 1.f, alpha, x, static_cast<float>(info->height) - y - height, width, height, 0.f, 0.f, 0.f, x, ContentY(y), width, height);
+      ctx->DrawImage(ctx, texture, 1.f, 1.f, 1.f, alpha, x, static_cast<float>(info->height) - y - height, width, height, 0.f, 0.f, 0.f, ContentX(x), ContentY(y), width, height);
    };
    const B2SImage& onImage = m_b2s->m_backglassOnImage;
    if (onImage.m_image == nullptr || onImage.m_brightness < 1.f)
@@ -2218,7 +2225,7 @@ bool B2SRenderer::RenderScoreView(VPXRenderContext2D* ctx, B2SServer* server)
       ctx->DrawImage(ctx, m_b2s->m_dmdImage.m_image, 1.f, 1.f, 1.f, 1.f,
          0.f, 0.f, m_dmdWidth, m_dmdHeight,
          0.f, 0.f, 0.f, // No rotation
-         0.f, m_layoutOY, m_dmdWidth, m_dmdHeight);
+         ContentX(0.f), m_layoutOY, m_dmdWidth, m_dmdHeight);
 
    // Draw illuminations, scores and DMD overlays
    RenderBulbs(ctx, server, m_b2s->m_dmdIlluminations, elapsed, B2SDualMode::Both, false); // Reference does not dual-filter score view bulbs
@@ -2243,7 +2250,7 @@ void B2SRenderer::RenderDisplays(VPXRenderContext2D* ctx, B2SServer* server, int
          continue;
       while (i >= m_dmdOverlays.size())
          m_dmdOverlays.emplace_back(std::make_unique<DMDOverlay::Renderer>(m_vpxApi, m_resURIResolver));
-      m_dmdOverlays[i]->SetViewOY(m_layoutOY); // Placed with the KeepAspectRatio placement
+      m_dmdOverlays[i]->SetViewOffset(m_layoutOX, m_layoutOY); // Placed with the KeepAspectRatio placement
       m_dmdOverlays[i]->Render(ctx, displays[i], backImage);
    }
 }

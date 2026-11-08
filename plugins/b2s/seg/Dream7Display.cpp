@@ -38,7 +38,7 @@ void Dream7Display::Render(VPXRenderContext2D* const ctx)
             m_pGraphics->ResetTransform();
             ClearInvalidated();
          }
-         m_pGraphics->DrawToContext(ctx, GetLeft(), GetTop(), m_viewOY);
+         m_pGraphics->DrawToContext(ctx, GetLeft(), GetTop(), m_viewOX, m_viewOY);
       }
    }
 }

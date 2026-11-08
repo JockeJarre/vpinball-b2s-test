@@ -37,7 +37,7 @@ public:
    void SetTransform(const Matrix& pModelMatrix);
    VPXTexture GetTexture();
    void SyncTexture();
-   void DrawToContext(VPXRenderContext2D* ctx, int left, int top, float oy = 0.f); // oy: KeepAspectRatio vertical placement on the padded surface
+   void DrawToContext(VPXRenderContext2D* ctx, int left, int top, float ox = 0.f, float oy = 0.f); // ox/oy: KeepAspectRatio placement on the padded surface
    int GetWidth() const { return m_width; }
    int GetHeight() const { return m_height; }
 
