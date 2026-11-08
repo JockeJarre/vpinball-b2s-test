@@ -1,6 +1,7 @@
 # B2S Pro — KeepAspectRatio handover
 
-Date: 2026-11-08 · Branch `b2s-pro` @ `4eb064b7b` · Repo `JockeJarre/vpinball-b2s-test`
+Date: 2026-11-08 · Branch `b2s-pro`, code tip `4eb064b7b` (this document and its updates on top)
+· Repo `JockeJarre/vpinball-b2s-test`
 
 ---
 
@@ -114,9 +115,29 @@ m_layoutOX = 0.5f * (m_padW - contentW);                 // always centered, no 
 
 ## 3. `.B2SPro` write guard removed (`8a695bf11`)
 
-`common.cpp` refused to save DMD-overlay edits into `.B2SPro` documents. A `.B2SPro` file **is** a
-`.directb2s` XML document plus the extra B2S Pro tags, so the guard was protecting nothing; `.B2SPro`
-is edited and saved exactly like `.directb2s`.
+`common.cpp` refused to save DMD-overlay edits into `.B2SPro` documents (`IsB2SProFile`, commit
+`d027e00b1`): a `.B2SPro` edit was rejected with "DMD overlay edits are not saved into .B2SPro files".
+A `.B2SPro` file **is** a `.directb2s` XML document plus the extra B2S Pro tags, so the guard was
+protecting nothing; `.B2SPro` is edited and saved exactly like `.directb2s`.
+
+The save target, spelled out (this is what the handover left implicit, and what was decided after the
+review):
+
+| | guard present | guard removed (current) |
+|---|---|---|
+| table has a `.B2SPro` (the lookup picks it) | save refused, log warning | saved into **that `.B2SPro`** |
+| table has only a `.directb2s` | saved into the `.directb2s` | saved into **that `.directb2s`** |
+
+The save always goes to *the file the document was loaded from*: `m_overlayDoc.path = m_b2sPath`, and
+`FindB2SFile()` prefers `.B2SPro` over `.directb2s` (both by table name and by folder name). No
+redirect to a `.B2SPro` sibling — the idea of writing a `.B2SPro` for a legacy-only table (commit
+`4d51d1684`) was reviewed and dropped, it creates a second document that can drift from the loaded
+one. An opened `.directb2s` saves as `.directb2s`, an opened `.B2SPro` saves as `.B2SPro`.
+
+`WriteDisplays` rewrites only the `<DMD>` children of `<Displays>`, everything else in the document
+(including the embedded base64 images) is preserved; the write goes through a `.tmp` file renamed over
+the original, so a failed save cannot leave a truncated file, on a worker thread so a big document
+cannot stall the play thread.
 
 ---
 
@@ -219,7 +240,10 @@ Verdict: near-identical siblings from the same `Update for B2S pro` base.
 3. Rebuild the Windows artifacts after any further renderer change (only the mingw ones are current).
 4. Cherry-pick the final commits onto the main `vpinball` repo branch `b2s-keep-aspect-ratio`.
 5. Decide on the 6 upstream fix/diagnostics cherry-picks (§7).
-6. `resources/` is untracked; add `.gitattributes` and commit if the samples should live in the repo.
+8. **Open decision, closed on review**: saving a document loaded from a legacy `.directb2s` into a
+   `.B2SPro` sibling (`4d51d1684`) was implemented, reviewed and **dropped** — saves stay in the
+   loaded file (§3).
+9. `resources/` is untracked; add `.gitattributes` and commit if the samples should live in the repo.
 
 ---
 
