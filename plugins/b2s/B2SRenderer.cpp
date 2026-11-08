@@ -22,6 +22,8 @@ MSGPI_BOOL_VAL_SETTING(upgradedSegRenderingProp, "UpgradedSegmentRendering", "Up
    "Render LED score displays with the upgraded segment renderer (turn off for the original B2S segment rendering)", true, true);
 MSGPI_BOOL_VAL_SETTING(keepAspectRatioProp, "KeepAspectRatio", "Keep aspect ratio",
    "Keep the aspect ratio of the backglass and score view images, filling the rest of the window with black borders (turn off to stretch the images over the whole window)", true, false);
+MSGPI_INT_VAL_SETTING(maxBorderProp, "MaxBorder", "Max border",
+   "Limit of KeepAspectRatio borders, percent of the view per side (0 removes the limit)", true, 0, 50, 15);
 
 static const char* dualModeValues[] = { "Authentic", "Fantasy" };
 MSGPI_ENUM_VAL_SETTING(dualModeProp, "DualMode", "Dual Mode", "Active mode for dual backglasses (authentic or fantasy)", true, 1, 2, dualModeValues, 1);
@@ -174,6 +176,7 @@ void B2SRenderer::RegisterSettings(const MsgPluginAPI* const msgApi, unsigned in
    msgApi->RegisterSetting(endpointId, &dualModeProp);
    msgApi->RegisterSetting(endpointId, &upgradedSegRenderingProp);
    msgApi->RegisterSetting(endpointId, &keepAspectRatioProp);
+   msgApi->RegisterSetting(endpointId, &maxBorderProp);
 }
 
 namespace
@@ -186,6 +189,8 @@ namespace
    void MSGPIAPI UpgradedSegSet(void*, int v) { upgradedSegRenderingProp_Set(v); }
    int MSGPIAPI KeepAspectRatioGet(void*) { return keepAspectRatioProp_Get(); }
    void MSGPIAPI KeepAspectRatioSet(void*, int v) { keepAspectRatioProp_Set(v); }
+   int MSGPIAPI MaxBorderGet(void*) { return maxBorderProp_Get(); }
+   void MSGPIAPI MaxBorderSet(void*, int v) { maxBorderProp_Set(v); }
 }
 
 int B2SRenderer::FillSettingsItems(PagedUIItemDef* items)
@@ -218,14 +223,25 @@ int B2SRenderer::FillSettingsItems(PagedUIItemDef* items)
    items[3].tooltip = "Keep the aspect ratio of the backglass and score view images, filling the rest of the window with black borders (turn off to stretch the images over the whole window)";
    items[3].storage = PAGEDUI_STORAGE_HOST;
    items[3].boolProp = { 0, &KeepAspectRatioGet, &KeepAspectRatioSet };
-   return 4;
+   items[4] = {};
+   items[4].type = PAGEDUI_ITEM_INT;
+   items[4].id = "MaxBorder";
+   items[4].label = "Max border";
+   items[4].tooltip = "Limit of KeepAspectRatio borders, percent of the view per side (0 removes the limit)";
+   items[4].storage = PAGEDUI_STORAGE_HOST;
+   items[4].intProp = { 0, 50, 15, "%d%%", &MaxBorderGet, &MaxBorderSet };
+   return 5;
 }
 
 // KeepAspectRatio rendering: the host stretches the source surface over the whole window, so keeping the
 // image aspect ratio means covering the area outside the centered image rectangle with opaque black bars.
 // The bars are drawn in source space over the full drawing extent, hence they also mask the illuminations,
 // scores and DMD overlays which are authored in the image coordinate space
-void B2SRenderer::RenderAspectBars(VPXRenderContext2D* ctx)
+//
+// refWidth/refHeight is the aspect reference, that is the aspect the view must show. It is not the source
+// surface aspect: hiding the grill shrinks the source surface (the source height gets the grill height
+// removed) which would grow the borders by the grill share, so the backglass passes the full image size.
+void B2SRenderer::RenderAspectBars(VPXRenderContext2D* ctx, const float refWidth, const float refHeight)
 {
    if (m_blackTexture == nullptr)
    {
@@ -236,8 +252,8 @@ void B2SRenderer::RenderAspectBars(VPXRenderContext2D* ctx)
    }
 
    const float wndAspect = (ctx->outHeight > 0.f) ? ctx->outWidth / ctx->outHeight : 1.f;
-   const float srcAspect = (ctx->srcHeight > 0.f) ? ctx->srcWidth / ctx->srcHeight : 1.f;
-   if (fabsf(wndAspect - srcAspect) < 1e-4f)
+   const float refAspect = (refHeight > 0.f) ? refWidth / refHeight : 1.f;
+   if (fabsf(wndAspect - refAspect) < 1e-4f)
       return; // Matching aspects, no border to draw
 
    const auto drawBar = [this, ctx](const float x, const float y, const float w, const float h)
@@ -248,17 +264,23 @@ void B2SRenderer::RenderAspectBars(VPXRenderContext2D* ctx)
          x, y, w, h);
    };
 
-   if (srcAspect < wndAspect)
+   // Borders are given as a fraction of the source surface, the host maps it proportionally onto the window
+   const float cap = maxBorderProp_Get() / 100.f; // 0 = no limit
+   if (refAspect < wndAspect)
    {
-      // The source is narrower than the window: pillarbox, bars on the left and right
-      const float barW = 0.5f * ctx->srcWidth * (1.f - srcAspect / wndAspect);
+      // The reference is narrower than the window: pillarbox, bars on the left and right
+      float barW = 0.5f * ctx->srcWidth * (1.f - refAspect / wndAspect);
+      if (cap > 0.f)
+         barW = std::min(barW, cap * ctx->srcWidth);
       drawBar(0.f, 0.f, barW, ctx->srcHeight);
       drawBar(ctx->srcWidth - barW, 0.f, barW, ctx->srcHeight);
    }
    else
    {
-      // The source is wider than the window: letterbox, bars on the top and bottom
-      const float barH = 0.5f * ctx->srcHeight * (1.f - wndAspect / srcAspect);
+      // The reference is wider than the window: letterbox, bars on the top and bottom
+      float barH = 0.5f * ctx->srcHeight * (1.f - wndAspect / refAspect);
+      if (cap > 0.f)
+         barH = std::min(barH, cap * ctx->srcHeight);
       drawBar(0.f, 0.f, ctx->srcWidth, barH);
       drawBar(0.f, ctx->srcHeight - barH, ctx->srcWidth, barH);
    }
@@ -2125,7 +2147,7 @@ bool B2SRenderer::RenderBackglass(VPXRenderContext2D* ctx, B2SServer* server)
    RenderDisplays(ctx, server, 0, backImage);
 
    if (keepAspectRatioProp_Get())
-      RenderAspectBars(ctx);
+      RenderAspectBars(ctx, m_b2sWidth, m_b2sHeight + m_grillCut); // The full image aspect, grill included
 
    return true;
 }
@@ -2195,7 +2217,7 @@ bool B2SRenderer::RenderScoreView(VPXRenderContext2D* ctx, B2SServer* server)
    RenderDisplays(ctx, server, 1, m_b2s->m_dmdImage.m_image);
 
    if (keepAspectRatioProp_Get())
-      RenderAspectBars(ctx);
+      RenderAspectBars(ctx, m_dmdWidth, m_dmdHeight);
 
    return true;
 }

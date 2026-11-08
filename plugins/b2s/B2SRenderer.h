@@ -34,7 +34,7 @@ public:
    ~B2SRenderer();
 
    static void RegisterSettings(const MsgPluginAPI* const msgApi, unsigned int endpointId);
-   // Fills the renderer owned entries (ShowGrill, DualMode, UpgradedSegmentRendering, KeepAspectRatio) of the plugin
+   // Fills the renderer owned entries (ShowGrill, DualMode, UpgradedSegmentRendering, KeepAspectRatio, MaxBorder) of the plugin
    // declared "settings" sheet, returns the number of items filled
    static int FillSettingsItems(PagedUIItemDef* items);
 
@@ -72,7 +72,7 @@ private:
    void RenderLegacyScoreDisplay(VPXRenderContext2D* ctx, B2SServer* server, const B2SScore& reel, bool dream7, const std::vector<SegElementType>& segTypes,
       const ankerl::unordered_dense::map<int, string>& playerScoreText, bool fromDigits);
    void UpdateAnimations(vector<B2SAnimation>& animations, float elapsed, B2SServer* server, B2SDualMode dualMode);
-   void RenderAspectBars(VPXRenderContext2D* ctx); // KeepAspectRatio black borders over the stretched source surface
+   void RenderAspectBars(VPXRenderContext2D* ctx, float refWidth, float refHeight); // KeepAspectRatio black borders over the stretched source surface, refWidth/refHeight is the aspect the view must show
    B2SDualMode ActiveDualMode() const;
    void OnRandomAnimationTrigger(vector<B2SAnimation>& animations, B2SRomIDType romIdType, int romId, bool start);
    void DispatchScriptTriggers(B2SServer* server);

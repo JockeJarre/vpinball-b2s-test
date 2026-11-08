@@ -74,13 +74,13 @@ namespace
       info->info = nullptr;
    }
 
-   unsigned int MSGPIAPI SettingsItemCount(void*, const char*) { return 9; }
+   unsigned int MSGPIAPI SettingsItemCount(void*, const char*) { return 10; }
 
    void MSGPIAPI SettingsGetItems(void*, const char*, PagedUIItemDef* items)
    {
       int pos = 0;
       FillHeader(items[pos++], "Backglass Settings");
-      pos += B2SRenderer::FillSettingsItems(items + pos); // ShowGrill, DualMode, UpgradedSegmentRendering, KeepAspectRatio
+      pos += B2SRenderer::FillSettingsItems(items + pos); // ShowGrill, DualMode, UpgradedSegmentRendering, KeepAspectRatio, MaxBorder
       PagedUIItemDef& ledType = items[pos++];
       ledType = {};
       ledType.type = PAGEDUI_ITEM_ENUM;
@@ -261,13 +261,6 @@ namespace
    {
       if (doc.path.empty())
          return 1;
-      // B2S Pro: .B2SPro files belong to the B2S Pro Designer. Rewriting one through tinyxml2 is not yet proven
-      // to keep it loadable by the Designer and the B2S Pro Server, so overlay edits are not saved into them.
-      if (IsB2SProFile(doc.path))
-      {
-         LOGW("DMD overlay edits are not saved into .B2SPro files: " + PluginStrings::PathToUTF8(doc.path));
-         return 1;
-      }
       {
          std::lock_guard lock(fileWriter.mutex);
          if (!fileWriter.thread.joinable())
