@@ -5,10 +5,10 @@
 # Cross-compiles the plugin (and nothing else, BUILD_APP=OFF) with mingw-w64:
 #   ./tools/build_b2s_plugin_windows.sh            # x64, Release
 #   ./tools/build_b2s_plugin_windows.sh x64 Debug
-#   ./tools/build_b2s_plugin_windows.sh x86        # 32 bit plugin-b2s.dll
+#   ./tools/build_b2s_plugin_windows.sh x86        # 32 bit plugin-b2spro.dll
 #
-# Output: build-b2s-win-<arch>/plugins/b2s/  (plugin DLL + plugin.cfg + the mingw
-# runtime DLLs, ready to be dropped in the Visual Pinball plugins/b2s folder).
+# Output: build-b2s-win-<arch>/plugins/b2s-pro/  (plugin DLL + plugin.cfg + the mingw
+# runtime DLLs, ready to be dropped in the Visual Pinball plugins/b2s-pro folder).
 #
 # Dependencies: cmake, ninja or make, and the mingw-w64 toolchain:
 #   Debian/Ubuntu:  sudo apt install mingw-w64
@@ -87,7 +87,7 @@ cmake --build "${BUILD_DIR}" --target B2SPlugin -j"$(nproc)"
 
 # Stage the mingw runtime next to the plugin so the folder can be dropped into a Visual
 # Pinball installation as is ('-print-file-name' resolves them inside the toolchain)
-OUT="${BUILD_DIR}/plugins/b2s"
+OUT="${BUILD_DIR}/plugins/b2s-pro"
 for dll in libstdc++-6.dll libgcc_s_seh-1.dll libwinpthread-1.dll; do
    src="$("${CXX}" -print-file-name="${dll}")"
    if [ -f "${src}" ]; then
@@ -98,5 +98,5 @@ for dll in libstdc++-6.dll libgcc_s_seh-1.dll libwinpthread-1.dll; do
 done
 
 echo
-echo "Built: ${OUT}/$( [ "${ARCH}" = x64 ] && echo plugin-b2s64.dll || echo plugin-b2s.dll ) (${CONFIG})"
+echo "Built: ${OUT}/$( [ "${ARCH}" = x64 ] && echo plugin-b2spro64.dll || echo plugin-b2spro.dll ) (${CONFIG})"
 ls -la "${OUT}"

@@ -1,7 +1,8 @@
 # Builds only the B2S plugin for Windows (no application), and uploads the plugin
 # folder as a zip artifact: extract it into the Visual Pinball "plugins" folder
-# (it provides plugins/b2s/). Manually runnable from any branch, and run on pull
-# requests touching the plugin.
+# (it provides plugins/b2s-pro/, so that it does not collide with the official B2S
+# plugin). Manually runnable from any branch, run on pull requests touching the
+# plugin, and run on pushes to master and b2s-pro.
 name: b2s-plugin
 on:
   workflow_dispatch:
@@ -21,7 +22,7 @@ on:
       - make/CMakeLists_plugins.txt
       - .github/workflows/b2s-plugin.yml
   push:
-    branches: [master]
+    branches: [master, b2s-pro]
     paths:
       - plugins/b2s/**
       - plugins/plugins/**
@@ -85,23 +86,23 @@ jobs:
         # The mingw built plugin needs its C/C++ runtime DLLs next to it (the MSVC build uses
         # a static runtime and needs none)
         run: |
-          cp /c/msys64/ucrt64/bin/libstdc++-6.dll build/plugins/b2s/
-          cp /c/msys64/ucrt64/bin/libgcc_s_seh-1.dll build/plugins/b2s/
-          cp /c/msys64/ucrt64/bin/libwinpthread-1.dll build/plugins/b2s/
+          cp /c/msys64/ucrt64/bin/libstdc++-6.dll build/plugins/b2s-pro/
+          cp /c/msys64/ucrt64/bin/libgcc_s_seh-1.dll build/plugins/b2s-pro/
+          cp /c/msys64/ucrt64/bin/libwinpthread-1.dll build/plugins/b2s-pro/
       - name: Package the plugin
         # MSVC is a multi-config generator and places the DLL under a per-config subdirectory
         run: |
-          mkdir -p staging/b2s
-          cp build/plugins/b2s/plugin.cfg staging/b2s/
-          if compgen -G "build/plugins/b2s/*.dll" > /dev/null; then
-            cp build/plugins/b2s/*.dll staging/b2s/
+          mkdir -p staging/b2s-pro
+          cp build/plugins/b2s-pro/plugin.cfg staging/b2s-pro/
+          if compgen -G "build/plugins/b2s-pro/*.dll" > /dev/null; then
+            cp build/plugins/b2s-pro/*.dll staging/b2s-pro/
           else
-            cp build/plugins/b2s/"${{ inputs.config || 'Release' }}"/*.dll staging/b2s/
+            cp build/plugins/b2s-pro/"${{ inputs.config || 'Release' }}"/*.dll staging/b2s-pro/
           fi
           cd staging
-          7z a -tzip "../b2s-plugin-${{ matrix.platform }}-${{ matrix.arch }}-${{ inputs.config || 'Release' }}.zip" b2s
+          7z a -tzip "../b2s-pro-${{ matrix.platform }}-${{ matrix.arch }}-${{ inputs.config || 'Release' }}.zip" b2s-pro
       - uses: actions/upload-artifact@v7
         with:
-          name: b2s-plugin-${{ matrix.platform }}-${{ matrix.arch }}-${{ inputs.config || 'Release' }}
+          name: b2s-pro-${{ matrix.platform }}-${{ matrix.arch }}-${{ inputs.config || 'Release' }}
           path: b2s-plugin-${{ matrix.platform }}-${{ matrix.arch }}-${{ inputs.config || 'Release' }}.zip
           archive: false

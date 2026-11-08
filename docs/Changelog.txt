@@ -18,6 +18,9 @@ FEATURES:
 - add -CaptureAttract command line option to automatically capture an attract video
 - B2S plugin: add a 'Keep aspect ratio' setting (plugin settings page) which keeps the aspect ratio of the backglass
   and score view images, filling the rest of the window with black borders on the sides matching the window shape
+- B2S Pro: the plugin is built under its own 'plugins/b2s-pro' plugin folder, with the 'B2SPro' plugin id and the
+  'plugin-b2spro' / 'plugin-b2spro64' libraries, so that it can be installed next to the stock B2S plugin without
+  replacing it
 
 - Folder layout has been redesigned:
   . Folder layout now conforms to platform requirements, with the application stored in its read-only application folder (for example 'C:\Program Files' under Windows),

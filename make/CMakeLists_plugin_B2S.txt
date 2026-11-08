@@ -94,12 +94,12 @@ if(BUILD_SHARED)
       endif()
       set_target_properties(B2SPlugin PROPERTIES
          PREFIX ""
-         OUTPUT_NAME "$<IF:$<STREQUAL:${ARCH},x64>,plugin-b2s64,plugin-b2s>"
+         OUTPUT_NAME "$<IF:$<STREQUAL:${ARCH},x64>,plugin-b2spro64,plugin-b2spro>"
       )
    else()
       set_target_properties(B2SPlugin PROPERTIES
          PREFIX ""
-         OUTPUT_NAME "plugin-b2s"
+         OUTPUT_NAME "plugin-b2spro"
       )
       if(PLATFORM STREQUAL "macos")
          set_target_properties(B2SPlugin PROPERTIES
@@ -109,11 +109,11 @@ if(BUILD_SHARED)
    endif()
 
    set_target_properties(B2SPlugin PROPERTIES
-      LIBRARY_OUTPUT_DIRECTORY "${PLUGINS_DIR}/b2s"
+      LIBRARY_OUTPUT_DIRECTORY "${PLUGINS_DIR}/b2s-pro"
    )
 
    add_custom_command(TARGET B2SPlugin POST_BUILD
-      COMMAND "${CMAKE_COMMAND}" -E copy "${CMAKE_SOURCE_DIR}/plugins/b2s/plugin.cfg" "${PLUGINS_DIR}/b2s/plugin.cfg"
+      COMMAND "${CMAKE_COMMAND}" -E copy "${CMAKE_SOURCE_DIR}/plugins/b2s/plugin.cfg" "${PLUGINS_DIR}/b2s-pro/plugin.cfg"
    )
 
    if(POST_BUILD_COPY_EXT_LIBS AND PLATFORM STREQUAL "windows-mingw")
@@ -137,7 +137,7 @@ if(BUILD_STATIC)
 
    set_target_properties(B2SPlugin PROPERTIES
       PREFIX ""
-      OUTPUT_NAME "plugin-b2s"
+      OUTPUT_NAME "plugin-b2spro"
    )
 endif()
 
