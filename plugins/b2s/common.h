@@ -86,6 +86,12 @@ vector<uint8_t> base64_decode(const char * const __restrict value, const size_t 
 int string_to_int(const string& str, int defaultValue);
 bool is_string_numeric(const string& str, int* const __restrict result);
 
+// B2S Pro: backglass file extensions. Like the B2S Pro Server, the complete lookup sequence
+// is run for .B2SPro first, and for the legacy .directb2s only when no .B2SPro file exists.
+constexpr std::string_view B2SProFileExtension = ".B2SPro"sv;
+constexpr std::string_view LegacyDirectB2SFileExtension = ".directb2s"sv;
+bool IsB2SProFile(const std::filesystem::path& path);
+
 // RIFF/WAVE decoder for sounds embedded in .directb2s files.
 // Output payload is ready to be submitted as an AudioUpdateMsg buffer (mono/stereo, int16 or float32).
 struct WavData

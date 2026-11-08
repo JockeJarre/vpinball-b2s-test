@@ -30,14 +30,14 @@ static B2SServer* s_server = nullptr;
 // Script interface
 //
 
-PSC_ARRAY1(B2S_ByteArray, uint8, 0)
-PSC_ARRAY1(B2S_IntArray, int32, 0)
-PSC_ARRAY2(B2S_StructArray, int32, 0, 0)
+PSC_ARRAY1(B2SPro_ByteArray, uint8, 0)
+PSC_ARRAY1(B2SPro_IntArray, int32, 0)
+PSC_ARRAY2(B2SPro_StructArray, int32, 0, 0)
 
 // Proxy class for PinMAME GameSettings
 static std::unique_ptr<PinballPlugin::Scriptable::ScriptClassProxy> m_gameSettingsProxy;
 class GameSettings { PSC_IMPLEMENT_REFCOUNT() }; // Dummy class as we directly use the proxied object
-PSC_CLASS_START(B2S_GameSettings, GameSettings)
+PSC_CLASS_START(B2SPro_GameSettings, GameSettings)
    members.clear();
    PSC_PROXY_PROP_R(m_gameSettingsProxy.get(), uint32, AddRef)
    PSC_PROXY_PROP_R(m_gameSettingsProxy.get(), uint32, Release)
@@ -47,7 +47,7 @@ PSC_CLASS_END()
 // Proxy class for PinMAME Settings
 static std::unique_ptr<PinballPlugin::Scriptable::ScriptClassProxy> m_settingsProxy;
 class Settings { PSC_IMPLEMENT_REFCOUNT() }; // Dummy class as we directly use the proxied object
-PSC_CLASS_START(B2S_Settings, Settings)
+PSC_CLASS_START(B2SPro_Settings, Settings)
    members.clear();
    PSC_PROXY_PROP_R(m_settingsProxy.get(), uint32, AddRef)
    PSC_PROXY_PROP_R(m_settingsProxy.get(), uint32, Release)
@@ -57,7 +57,7 @@ PSC_CLASS_END()
 // Proxy class for PinMAME Game
 static std::unique_ptr<PinballPlugin::Scriptable::ScriptClassProxy> m_gameProxy;
 class Game { PSC_IMPLEMENT_REFCOUNT() }; // Dummy class as we directly use the proxied object
-PSC_CLASS_START(B2S_Game, Game)
+PSC_CLASS_START(B2SPro_Game, Game)
    members.clear();
    PSC_PROXY_PROP_R(m_gameProxy.get(), uint32, AddRef)
    PSC_PROXY_PROP_R(m_gameProxy.get(), uint32, Release)
@@ -67,10 +67,10 @@ PSC_CLASS_START(B2S_Game, Game)
    PSC_PROXY_PROP_R(m_gameProxy.get(), string, Year)
    PSC_PROXY_PROP_R(m_gameProxy.get(), string, Manufacturer)
    PSC_PROXY_PROP_R(m_gameProxy.get(), string, CloneOf)
-   PSC_PROXY_PROP_R(m_gameProxy.get(), B2S_GameSettings, Settings)
+   PSC_PROXY_PROP_R(m_gameProxy.get(), B2SPro_GameSettings, Settings)
 PSC_CLASS_END()
 
-PSC_CLASS_START(B2S_Server, B2SServer)
+PSC_CLASS_START(B2SPro_Server, B2SServer)
    PSC_FUNCTION0(void, Dispose)
    PSC_PROP_RW(string, TableName)
    PSC_PROP_W(string, WorkingDir)
@@ -161,7 +161,7 @@ PSC_CLASS_START(B2S_Server, B2SServer)
    PSC_PROXY_PROP_RW(me, bool, ShowTitle)
    PSC_PROXY_PROP_RW(me, bool, HandleKeyboard)
    PSC_PROXY_PROP_RW(me, int32, HandleMechanics)
-   PSC_PROXY_PROP_R(me, B2S_Settings, Settings)
+   PSC_PROXY_PROP_R(me, B2SPro_Settings, Settings)
    PSC_PROXY_PROP_RW_ARRAY1(me, int32, SolMask, int)
    // Run/Pause/Stop
    PSC_PROXY_FUNCTION0(me, void, Run)
@@ -180,21 +180,21 @@ PSC_CLASS_START(B2S_Server, B2SServer)
    PSC_PROXY_PROP_R_ARRAY1(me, bool, Solenoid, int)
    PSC_PROXY_PROP_R_ARRAY1(me, int32, GIString, int)
    PSC_PROXY_PROP_RW_ARRAY1(me, int32, Dip, int)
-   PSC_PROXY_PROP_R(me, B2S_ByteArray, NVRAM)
-   PSC_PROXY_PROP_R(me, B2S_StructArray, ChangedNVRAM);
-   PSC_PROXY_PROP_R(me, B2S_StructArray, ChangedLamps);
-   PSC_PROXY_PROP_R(me, B2S_StructArray, ChangedGIStrings);
-   PSC_PROXY_PROP_R(me, B2S_StructArray, ChangedSolenoids);
-   PSC_PROXY_PROP_R(me, B2S_StructArray, NewSoundCommands);
-   PSC_PROXY_PROP_R_ARRAY2(me, B2S_StructArray, ChangedLEDs, int, int)
-   PSC_PROXY_PROP_R_ARRAY3(me, B2S_StructArray, ChangedLEDs, int, int, int)
-   PSC_PROXY_PROP_R_ARRAY4(me, B2S_StructArray, ChangedLEDs, int, int, int, int)
+   PSC_PROXY_PROP_R(me, B2SPro_ByteArray, NVRAM)
+   PSC_PROXY_PROP_R(me, B2SPro_StructArray, ChangedNVRAM);
+   PSC_PROXY_PROP_R(me, B2SPro_StructArray, ChangedLamps);
+   PSC_PROXY_PROP_R(me, B2SPro_StructArray, ChangedGIStrings);
+   PSC_PROXY_PROP_R(me, B2SPro_StructArray, ChangedSolenoids);
+   PSC_PROXY_PROP_R(me, B2SPro_StructArray, NewSoundCommands);
+   PSC_PROXY_PROP_R_ARRAY2(me, B2SPro_StructArray, ChangedLEDs, int, int)
+   PSC_PROXY_PROP_R_ARRAY3(me, B2SPro_StructArray, ChangedLEDs, int, int, int)
+   PSC_PROXY_PROP_R_ARRAY4(me, B2SPro_StructArray, ChangedLEDs, int, int, int, int)
    PSC_PROXY_PROP_R(me, int, RawDmdWidth)
    PSC_PROXY_PROP_R(me, int, RawDmdHeight)
-   PSC_PROXY_PROP_R(me, B2S_ByteArray, RawDmdPixels)
-   PSC_PROXY_PROP_R(me, B2S_IntArray, RawDmdColoredPixels)
+   PSC_PROXY_PROP_R(me, B2SPro_ByteArray, RawDmdPixels)
+   PSC_PROXY_PROP_R(me, B2SPro_IntArray, RawDmdColoredPixels)
    // Overall information
-   PSC_PROXY_PROP_R_ARRAY1(me, B2S_Game, Games, string)
+   PSC_PROXY_PROP_R_ARRAY1(me, B2SPro_Game, Games, string)
    // Deprecated properties
    PSC_PROXY_PROP_RW(me, bool, DoubleSize)
    PSC_PROXY_PROP_RW(me, bool, LockDisplay)
@@ -247,12 +247,16 @@ void DeleteTexture(VPXTexture texture)
 
 using namespace B2S;
 
-MSGPI_EXPORT void MSGPIAPI B2SPluginLoad(const uint32_t sessionId, const MsgPluginAPI* api)
+MSGPI_EXPORT void MSGPIAPI B2SProPluginLoad(const uint32_t sessionId, const MsgPluginAPI* api)
 {
    msgApi = api;
    endpointId = sessionId;
    apiThread = std::this_thread::get_id();
    LPISetup(endpointId, msgApi);
+
+   // B2S Pro: both this plugin and the stock B2S plugin replace the B2S.Server COM object, so only one may be enabled
+   if (msgApi->GetPluginEndpoint("B2S") != 0)
+      LOGW("The stock B2S plugin is also enabled. Both replace B2S.Server: disable it ([Plugin.B2S] Enable = 0) to use B2S Pro.");
 
    getVpxApiId = msgApi->GetMsgID(VPXPI_NAMESPACE, VPXPI_MSG_GET_API);
    msgApi->BroadcastMsg(endpointId, getVpxApiId, &vpxApi);
@@ -270,32 +274,32 @@ MSGPI_EXPORT void MSGPIAPI B2SPluginLoad(const uint32_t sessionId, const MsgPlug
    s_server = nullptr;
    auto classLambda = [](ScriptClassDef* scd) { scriptApi->RegisterScriptClass(scd); };
    auto arrayLambda = [](ScriptArrayDef* sad) { scriptApi->RegisterScriptArrayType(sad); };
-   RegisterB2S_Server(classLambda);
-   RegisterB2S_GameSettings(classLambda);
-   RegisterB2S_Settings(classLambda);
-   RegisterB2S_Game(classLambda);
-   RegisterB2S_ByteArray(arrayLambda);
-   RegisterB2S_IntArray(arrayLambda);
-   RegisterB2S_StructArray(arrayLambda);
-   m_gameProxy = std::make_unique<PinballPlugin::Scriptable::ScriptClassProxy>(msgApi, endpointId, "PinMAME_", "PinMAME_Game", "B2S_", B2S_Game_SCD);
-   m_gameSettingsProxy = std::make_unique<PinballPlugin::Scriptable::ScriptClassProxy>(msgApi, endpointId, "PinMAME_", "PinMAME_GameSettings", "B2S_", B2S_GameSettings_SCD);
-   m_settingsProxy = std::make_unique<PinballPlugin::Scriptable::ScriptClassProxy>(msgApi, endpointId, "PinMAME_", "PinMAME_Settings", "B2S_", B2S_Settings_SCD);
-   B2S_Server_SCD->CreateObject = []()
+   RegisterB2SPro_Server(classLambda);
+   RegisterB2SPro_GameSettings(classLambda);
+   RegisterB2SPro_Settings(classLambda);
+   RegisterB2SPro_Game(classLambda);
+   RegisterB2SPro_ByteArray(arrayLambda);
+   RegisterB2SPro_IntArray(arrayLambda);
+   RegisterB2SPro_StructArray(arrayLambda);
+   m_gameProxy = std::make_unique<PinballPlugin::Scriptable::ScriptClassProxy>(msgApi, endpointId, "PinMAME_", "PinMAME_Game", "B2SPro_", B2SPro_Game_SCD);
+   m_gameSettingsProxy = std::make_unique<PinballPlugin::Scriptable::ScriptClassProxy>(msgApi, endpointId, "PinMAME_", "PinMAME_GameSettings", "B2SPro_", B2SPro_GameSettings_SCD);
+   m_settingsProxy = std::make_unique<PinballPlugin::Scriptable::ScriptClassProxy>(msgApi, endpointId, "PinMAME_", "PinMAME_Settings", "B2SPro_", B2SPro_Settings_SCD);
+   B2SPro_Server_SCD->CreateObject = []()
    {
       if (s_server != nullptr)
       {
          s_server->AddRef();
          return static_cast<void*>(s_server);
       }
-      s_server = new B2SServer(msgApi, endpointId, vpxApi, pagedUIApi, B2S_Server_SCD);
+      s_server = new B2SServer(msgApi, endpointId, vpxApi, pagedUIApi, B2SPro_Server_SCD);
       s_server->SetOnDestroyHandler([](B2SServer* server) { if (s_server == server) s_server = nullptr; });
       return static_cast<void*>(s_server);
    };
    scriptApi->SubmitTypeLibrary(endpointId);
-   scriptApi->SetCOMObjectOverride("B2S.Server", B2S_Server_SCD);
+   scriptApi->SetCOMObjectOverride("B2S.Server", B2SPro_Server_SCD);
 }
 
-MSGPI_EXPORT void MSGPIAPI B2SPluginUnload()
+MSGPI_EXPORT void MSGPIAPI B2SProPluginUnload()
 {
    assert(s_server == nullptr);
    B2SServer::StopFileWriter();
@@ -305,13 +309,13 @@ MSGPI_EXPORT void MSGPIAPI B2SPluginUnload()
    m_gameProxy = nullptr;
    m_gameSettingsProxy = nullptr;
    m_settingsProxy = nullptr;
-   UnregisterB2S_ByteArray(arrayLambda);
-   UnregisterB2S_IntArray(arrayLambda);
-   UnregisterB2S_StructArray(arrayLambda);
-   UnregisterB2S_Game(classLambda);
-   UnregisterB2S_GameSettings(classLambda);
-   UnregisterB2S_Settings(classLambda);
-   UnregisterB2S_Server(classLambda);
+   UnregisterB2SPro_ByteArray(arrayLambda);
+   UnregisterB2SPro_IntArray(arrayLambda);
+   UnregisterB2SPro_StructArray(arrayLambda);
+   UnregisterB2SPro_Game(classLambda);
+   UnregisterB2SPro_GameSettings(classLambda);
+   UnregisterB2SPro_Settings(classLambda);
+   UnregisterB2SPro_Server(classLambda);
 
    msgApi->ReleaseMsgID(getVpxApiId);
    msgApi->ReleaseMsgID(getScriptApiId);

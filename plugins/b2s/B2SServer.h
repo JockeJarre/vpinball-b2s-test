@@ -6,8 +6,10 @@
 
 #include <cstdint>
 #include <climits>
+#include <chrono>
 #include <future>
 #include <mutex>
+#include <set>
 #include <cstdint>
 
 #include <unordered_dense.h>
@@ -155,17 +157,35 @@ public:
    void SetOnDestroyHandler(std::function<void(B2SServer*)> handler) { m_onDestroyHandler = handler; }
    float GetLampState(int b2sId) const;
    bool GetScriptedLampState(int b2sId, float& state, uint64_t* stamp = nullptr) const; // True when the script wrote this lamp id through B2SSetData
-   bool GetBulbState(const B2SBulb& bulb, float& state, bool* fromLampChannel = nullptr) const;
+   bool GetBulbState(const B2SBulb& bulb, float& state, bool* fromLampChannel = nullptr, uint64_t* writeStamp = nullptr) const;
    uint64_t NextStamp() const { return ++m_lampStamp; }
+   // B2S Pro: B2SSetData on an external pivot or position grid member name (handed to the render thread)
+   struct NamedMove
+   {
+      bool grid;
+      size_t index; // Into B2STable::m_positionGrids or m_namedPivots
+      string target; // Lower case trimmed member name
+      std::chrono::steady_clock::time_point time;
+   };
+   std::vector<NamedMove> DrainNamedMoves();
    int GetScoreDigit(int digit) const;
    int GetScoreDigitSegments(int digit) const; // Explicit B2SSetLED segment mask, -1 = none
    void ApplyScoreSegments(int digit, int segMask); // Explicit segment mask (CTLPI luminance bit order)
    bool ConsumeScoreDigitRoll(int digit); // Returns and clears the rolling flag set by B2SSetScore/B2SSetReel
    int GetPlayerScore(int player) const;
+   // Which writer is the most recent decides what a player display shows (reference: one digit store that both the digit calls and
+   // B2SSetScorePlayer write, the last writer wins): script digit writes and player score writes carry a stamp, PinMAME frames do not
+   uint64_t GetScoreDigitStamp(int digit) const;
+   uint64_t GetPlayerScoreStamp(int player) const;
+   bool HasPlayerScore(int player) const;
+   void SetRomScoreDigit(int digit, int value); // A digit decoded from a PinMAME frame: no script stamp, so it never takes a player display over
 
    // Animation engine glue: the renderer drives the animations and applies their effects through this interface
    B2SAnimationEffects GetAnimationEffects();
    void PulseSwitch(int switchId);
+   // B2S Pro physics switch zones: closes the switch, and every switch closed this way opens 200 ms after the last pulse of any of
+   // them (the reference's single shared release timer, BA:1028-1055)
+   void HoldSwitch(int switchId);
    bool IsIlluminationLocked(const string& group) const;
    bool AreScoreDisplaysHidden() const { return m_scoreDisplaysHidden; }
 
@@ -222,7 +242,7 @@ private:
    B2SOverlayDoc m_overlayDoc;
    bool m_overlaySheetRegistered = false;
    void RegisterOverlaySheet();
-   void ApplyScoreDigit(int digit, int value, bool roll);
+   void ApplyScoreDigit(int digit, int value, bool roll, bool script = true);
    std::function<void(B2SServer*)> m_onDestroyHandler;
 
    // Renderer
@@ -251,12 +271,26 @@ private:
    mutable std::mutex m_illuminationLockMutex;
    std::mutex m_animationTriggerMutex;
    std::vector<std::pair<int, int>> m_pendingAnimationTriggers;
+   std::mutex m_namedMoveMutex;
+   std::vector<NamedMove> m_pendingNamedMoves;
    int m_setSwitchIndex = -1; // Index of the "Switch" setter member in the proxied PinMAME controller class
-   std::map<int, std::atomic<int>> m_playerScores;
+   std::set<int> m_heldSwitches; // Switches closed by HoldSwitch, waiting for the shared release (message API thread only)
+   std::chrono::steady_clock::time_point m_holdDeadline {};
+   bool m_holdCheckPending = false;
+   void SetControllerSwitch(int switchId, bool closed);
+   void ReleaseHeldSwitches();
+   static void OnHoldCheck(void* data);
+   struct PlayerScore
+   {
+      std::atomic<int> value { 0 };
+      std::atomic<uint64_t> stamp { 0 }; // Write counter of the last B2SSetScorePlayer
+   };
+   std::map<int, PlayerScore> m_playerScores;
    struct ScoreDigit
    {
       std::atomic<int> value { 0 };
       std::atomic<bool> roll { false };
+      std::atomic<uint64_t> scriptStamp { 0 }; // Write counter of the last script write of this digit (B2SSetScore/ScoreDigit/Reel/Credits), 0 = none
       std::atomic<int> segMask { -1 }; // >= 0: explicit CTLPI-ordered segment mask set by B2SSetLED(B2SSetLEDDisplay)
    };
    std::map<int, ScoreDigit> m_scoreDigits;

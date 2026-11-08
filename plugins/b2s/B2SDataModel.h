@@ -3,9 +3,15 @@
 #pragma once
 
 #include <atomic>
+#include <chrono>
+#include <map>
+#include <optional>
 #include <unordered_map>
 
 #include "common.h"
+#include "DynamicLight.h"
+#include "Motion.h"
+#include "Physics.h"
 #include "tinyxml2/tinyxml2.h"
 
 namespace B2S {
@@ -16,7 +22,8 @@ enum class B2SRomIDType
    Lamp = 1,
    Solenoid = 2,
    GIString = 3,
-   Mech = 4
+   Mech = 4,
+   Switch = 5 // B2S Pro: playfield switch state, as read by Controller.Switch(n)
 };
 
 
@@ -134,6 +141,8 @@ public:
    const int m_id;
    const int m_b2sStartDigit;
    int m_resolvedStartDigit = 0; // Effective first digit (m_b2sStartDigit or auto-assigned)
+   int m_fileOrder = 0; // Position of the Score node in the file, across the backglass and DMD displays
+   int m_playerOffset = -1; // B2SPlayerNo > 0: first digit of this display in the player's score text, -1 when the player already has a display on this start digit (reference BP:21-33)
    const B2SScoreType m_b2sScoreType;
    const int m_b2sPlayerNo;
    const string m_reelType;
@@ -160,6 +169,15 @@ public:
    const int m_ledSegments; // Segment count from the ReelType suffix (Dream7LEDx/RenderedLEDx): 7, 10 or 14, else 0
 
    const B2SScoreRenderer m_scoreType;
+   const bool m_behindCanvas; // B2S Pro: reel displays drawn under the backglass canvas, shown only through its transparent openings (reference B2SReelBox.vb:167-176)
+   // B2S Pro reel digit sizing and 3D reels (reference fB:3573-3606, B2SReelBox.vb:105-177, Reel3DEffect.vb)
+   const bool m_keepDigitAspect; // Letterbox the digit image instead of stretching it to the box
+   const int m_reelDigitWidth; // With KeepDigitAspect: width of the digit image inside the box, 0 fits the whole image
+   const bool m_reel3DEnabled;
+   const int m_reel3DBrightness; // 0..400, the back light
+   const int m_reel3DTemperature; // 2000..6500 K, the back light colour
+   const int m_reel3DDepth; // 0..200, drum shading, side shadows and depth rings
+   const int m_reel3DGlass; // 0..200, glass reflection
 
    float m_reelIllu = -1.f; // ROM value of the ReelIlluB2SID lamp, polled each frame; -1 until observed (render thread)
    mutable uint64_t m_reelIlluStamp = 0; // Write counter of the last observed ROM change (script/ROM: most recent wins)
@@ -227,6 +245,21 @@ enum class B2SDualMode2
 };
 
 
+// B2S Pro Dynamic Front Lighting of a light bulb (reference fB:3032-3040, 3313-3316, 3355-3367): a non snippet bulb with a light field
+// (the alpha plane of DynamicFrontLightField) that re-lights the current pixels of the image snippets under it
+struct DynamicFront
+{
+   bool enabled = false; // DynamicFrontLighting="1", not an image snippet, with a decoded field
+   bool showLight = false; // DynamicFrontShowLight: the light image is drawn under every bulb
+   bool separate = false; // SeparateLightLayer: the light image is drawn at the light's Z, just before its overlays
+   int targetId = 0; // DynamicFrontTargetSnippetID: 0 lights every eligible snippet, N only the snippet with the bulb ID N
+   DynamicLight::Params params;
+   std::vector<uint8_t> field; // fieldW * fieldH alpha bytes
+   int fieldW = 0;
+   int fieldH = 0;
+};
+
+
 class B2SBulb final
 {
 public:
@@ -242,6 +275,8 @@ public:
    const B2SRomIDType m_romIdType;
    const bool m_romInverted;
    const bool m_initialState;
+   const bool m_initialStateOne; // B2S Pro: only InitialState="1" shows a pivot or native rotation bulb at startup, the Designer writes 2 for pivots (reference fB:4728-4759)
+   const int m_bulbId; // The bulb ID attribute, the reference names its picture box "PictureBox<ID>" (fB:3329, used by Dynamic Front targets)
    const B2SDualMode m_dualMode;
    const int m_intensity; // Unused property in original B2S
    const int m_zOrder;
@@ -259,13 +294,75 @@ public:
    const int m_snippitRotatingInterval;
    const B2SSnippitRotationDirection m_snippitRotatingDirection;
    const B2SSnippitRotationStopBehaviour m_snippitRotatingStopBehaviour;
-   const VPXTexture m_image;
+   const VPXTexture m_image; // B2S Pro: the full resolution RuntimeSnippitImage when the file provides one for a standard image snippit
    const VPXTexture m_offImage;
    const string m_text;
    const int m_textAlignment;
    const string m_fontName;
    const int m_fontSize;
    const int m_fontStyle;
+   const int m_flasherPulseDuration; // B2S Pro: ms the bulb stays shown after each ON write (0 = follows its state)
+   // B2S Pro pivot animation (PivotAnimation="1"): the image swings about its hinge between PivotDownAngle and
+   // PivotUpAngle on its trigger, and has no ROM visibility binding (reference BD:405-422, PB:143-157, PB:611-675)
+   const bool m_pivotAnimation;
+   const int m_pivotTriggerType; // 0 named commands, 1 solenoid, 2 lamp, 3 B2S id (and unknown values), 4 automatic, 5 switch
+   const int m_pivotTriggerId;
+   const bool m_pivotAutomaticOscillation; // Swings while triggered (forced by trigger type 4, ignored for named commands)
+   const float m_pivotX; // Hinge, as fractions of the cropped rectangle (unclamped)
+   const float m_pivotY;
+   const float m_pivotTipX; // Flipper tip, as fractions of the cropped rectangle (physics balls)
+   const float m_pivotTipY;
+   const float m_pivotDownAngle; // Degrees, positive turns clockwise
+   const float m_pivotUpAngle;
+   const int m_pivotDuration; // ms, 10..5000
+   const float m_pivotRandomStrength; // Ball impact variation in percent (physics balls)
+   const string m_pivotDownTrigger; // Named commands (trigger type 0)
+   const string m_pivotUpTrigger;
+   // B2S Pro external pivots and position grids: the member names are B2SSetData commands that turn or move the
+   // group's representative bulb (reference BD:549-607, BD:1686-1752)
+   const string m_externalPivotGroup;
+   const bool m_externalPivotRepresentative;
+   const float m_externalPivotAngle;
+   const string m_externalGridName;
+   const bool m_externalGridRepresentative;
+   const int m_externalGridDuration; // ms, 10..1000
+   // B2S Pro one-image native rotation (AutomaticRotationEnabled="1" on a standard image bulb, reference fB:3073-3106,
+   // PB:341-473). Separate from the legacy self rotating images, which keep their frame based behavior
+   const bool m_nativeRotation;
+   const bool m_nativeContinuous; // Spins from 2 s after load, no trigger
+   const B2SRomIDType m_nativeTriggerType; // Lamp (also B2S ids), Solenoid, Switch or GIString; NotDefined when continuous
+   const int m_nativeTriggerId;
+   const int m_nativeSteps; // 4..360, one revolution is steps * interval
+   const int m_nativeInterval; // ms per step, 10..500
+   const bool m_nativeAntiClockwise;
+   const int m_nativeStopBehaviour; // 0 spin off, 1 stop immediately, 2 run till end, 3 run to first step; other values stop immediately
+   const bool m_behindCanvas; // B2S Pro SnippitBehindCanvas: drawn before the backglass image, so only its transparent openings show it (reference fB:643-650)
+   const Motion::Config m_motion; // B2S Pro motion path and sequence group (reference fB:3225-3305); empty for other bulbs
+   int m_motionIndex = -1; // The bulb's item in the renderer's motion system, -1 when it has no motion (render thread)
+   const Physics::Config m_physics; // B2S Pro physics ball (reference fB:3151-3226); empty for other bulbs
+   std::vector<uint8_t> m_physicsMask; // PhysicsSelectionMaskData: the alpha plane of the occlusion mask, in backglass pixels (reference fB:4690-4719)
+   int m_physicsMaskW = 0;
+   int m_physicsMaskH = 0;
+   int m_physicsIndex = -1; // The ball in the renderer's physics system, -2 for a physics ball that is not simulated, -1 otherwise (render thread)
+   int m_physicsPivot = -1; // The pivot in the renderer's physics system when a ball names this bulb as its flipper (render thread)
+
+   // B2S Pro Dynamic Front Lighting. The light's data is const; the snippets of a file that has lights keep their pixels for the kernel (they are
+   // read once from the image, cut to the alpha cropped area like the reference's picture box image) and leave a record each frame they are drawn
+   const DynamicFront m_dfl;
+   bool m_cropEligible = false; // The image is cropped to its alpha box at load (standard image, no rotation, roll or full resolution image)
+   bool m_cropComputed = false; // m_pivotTex* and m_pivotDst* were computed
+   std::vector<uint8_t> m_dflPixels; // Snippets of a file with lights: m_pivotTexW * m_pivotTexH straight RGBA bytes
+   float m_dflBrightness = 0.f; // Lights: the brightness of this frame, shared by the base pass and the main pass (render thread)
+   uint64_t m_dflFrame = 0; // Snippets: the frame in which the bulb was drawn (render thread)
+   float m_dflX = 0.f; // Snippets: the rectangle drawn in that frame (authored pixels) and its pose
+   float m_dflY = 0.f;
+   float m_dflAngle = 0.f;
+   bool m_dflRotated = false; // Drawn through a pivot or native rotation (the kernel frame is built through three points)
+
+   // Computes the alpha cropped texture area and rectangle (m_pivotTex*, m_pivotDst*) of a bulb whose image is cropped at load
+   void ComputeCrop() noexcept;
+   // Reads the snippet's pixels for the lighting kernel
+   void ExtractPixels() noexcept;
 
 public:
    // Self-rotating image runtime. Start/Stop are thread safe requests consumed by UpdateRotation (render thread)
@@ -285,6 +382,63 @@ public:
    float m_romOn = -1.f;        // ROM on/off state for self-rotating images (drives rotation start/stop)
    bool m_spinDriverOn = false; // Last driving state applied to self-rotation (render thread only)
    bool m_bakedIntoBackground = false; // Bulb shares the BackglassOnImage ROM channel: it is drawn as part of the background, not as a separate bulb
+   std::chrono::steady_clock::time_point m_pulseEnd {}; // B2S Pro flasher pulse: shown until then (render thread)
+   uint64_t m_pulseWriteStamp = 0; // Write counter of the last state seen by the flasher pulse
+   bool m_pulseSourceOn = false; // Last state seen by the flasher pulse
+
+   // B2S Pro pivot runtime (render thread)
+   int m_pivotTexX = 0; // Alpha-cropped texture area (reference fB:3321-3325, fB:5042-5117)
+   int m_pivotTexY = 0;
+   int m_pivotTexW = 0;
+   int m_pivotTexH = 0;
+   int m_pivotDstX = 0; // Cropped rectangle on the backglass
+   int m_pivotDstY = 0;
+   int m_pivotDstW = 0;
+   int m_pivotDstH = 0;
+   float m_pivotAngle = 0.f;
+   float m_pivotStartAngle = 0.f;
+   float m_pivotTargetAngle = 0.f;
+   int m_pivotMoveDuration = 0;
+   std::chrono::steady_clock::time_point m_pivotMoveStart {};
+   bool m_pivotMoving = false;
+   bool m_pivotAutomaticActive = false;
+   bool m_pivotStarted = false; // Automatic trigger applied
+   float m_pivotProbe = -1.f; // ROM trigger state polled each frame; -1 until observed
+   std::function<void()> m_pivotUpdater = []() { };
+   uint64_t m_pivotScriptStamp = 0; // Last B2SSetData write seen by a B2S id trigger
+   uint64_t m_pivotShowStamp = 0; // Write counter of the last trigger event (each event shows the pivot)
+   bool m_pivotRotation = false; // Turned by named commands: external pivot or named-command pivot representative
+
+   // B2S Pro native rotation runtime (render thread). The angle is drawn through m_pivotAngle
+   std::function<void()> m_nativeUpdater = []() { };
+   float m_nativeProbe = -1.f; // Trigger state polled each frame; -1 until observed
+   uint64_t m_nativeShowStamp = 0; // Write counter of the last start or spinning frame (each shows the bulb)
+   bool m_nativeInitialized = false;
+   bool m_nativeContinuousStarted = false;
+   bool m_nativeCommandedOn = false; // Last trigger state, repeated reports are ignored (PB:341-356)
+   bool m_nativeRunning = false;
+   bool m_nativeRunTillEnd = false;
+   bool m_nativeRunToFirstStep = false;
+   double m_nativeSlowDown = 0.0; // Spin off progress in intervals, 0 when not slowing down
+   float m_nativeProgress = 0.f; // Degrees in [0, 360)
+   std::chrono::steady_clock::time_point m_nativeLoadTime {};
+   std::chrono::steady_clock::time_point m_nativeLastTick {};
+
+   // B2S Pro position grid representative runtime (render thread); positions and velocities are in output pixels, as the
+   // reference computes them on screen (PB:769-801, PB:967-1040)
+   int m_gridIndex = -1; // Position grid this bulb represents
+   bool m_gridCenterSet = false;
+   float m_gridCenterX = 0.f;
+   float m_gridCenterY = 0.f;
+   float m_gridOffsetX = 0.f; // Draw offset from the authored position, in backglass pixels
+   float m_gridOffsetY = 0.f;
+   bool m_gridRunning = false;
+   std::chrono::steady_clock::time_point m_gridStart {};
+   float m_gridDuration = 45.f;
+   float m_gridP0X = 0.f, m_gridP0Y = 0.f, m_gridP1X = 0.f, m_gridP1Y = 0.f;
+   float m_gridV0X = 0.f, m_gridV0Y = 0.f, m_gridV1X = 0.f, m_gridV1Y = 0.f; // px per ms
+   float m_gridLastVX = 0.f, m_gridLastVY = 0.f;
+   uint64_t m_gridShowStamp = 0; // Write counter of the last grid shift start (each one shows the bulb)
 
 private:
    std::atomic<int> m_rotRequest { 0 }; // 1 = start, 2 = stop
@@ -396,7 +550,7 @@ public:
    void Start(bool reverse = false); // Thread safe script-side request
    void Stop(); // Thread safe script-side request
 
-   // ROM event trigger parsed from IDJoin (lamp/solenoid/GI string, optionally inverted)
+   // ROM event trigger parsed from IDJoin (lamp/solenoid/GI string/switch, optionally inverted)
    struct RomTrigger
    {
       B2SRomIDType romIdType;
@@ -420,11 +574,8 @@ public:
    const int m_loops;
    const string m_idJoin;
    const bool m_startAnimationAtBackglassStartup;
-   const bool m_allLightsOffAtAnimationStart;
    const B2SLightsStateAtAnimationStart m_lightsStateAtAnimationStart;
-   const bool m_resetLightsAtAnimationEnd;
    const B2SLightsStateAtAnimationEnd m_lightsStateAtAnimationEnd;
-   const bool m_runAnimationTilEnd;
    const B2SAnimationStopBehaviour m_animationStopBehaviour;
    const bool m_lockInvolvedLamps;
    const bool m_hideScoreDisplays;
@@ -469,6 +620,31 @@ private:
 };
 
 
+// B2S Pro external pivot group, or the private group of a named-command pivot (reference ExternalPivotState, BD:1730-1752)
+struct B2SNamedPivot
+{
+   B2SBulb* representative = nullptr;
+   int duration = 80; // ms, 10..1000 (last registered member wins)
+   std::unordered_map<string, float> angles; // Lower case trimmed member name -> angle
+};
+
+// B2S Pro position grid (reference ExternalPositionGridState, BD:1686-1728)
+struct B2SPositionGrid
+{
+   B2SBulb* representative = nullptr;
+   int duration = 45; // ms, 10..1000 (last registered member wins)
+   std::unordered_map<string, B2SBulb*> targets; // Lower case trimmed member name -> marker
+   // Runtime (render thread)
+   struct Command
+   {
+      string target;
+      std::chrono::steady_clock::time_point time;
+   };
+   vector<Command> commands; // Moves not yet applied to the representative
+   string pending; // Target waiting for its look-ahead (or the flush)
+   std::chrono::steady_clock::time_point flushAt {};
+};
+
 class B2STable final
 {
 public:
@@ -479,6 +655,8 @@ public:
    const B2SScore* FindScoreDisplay(int displayId) const;
    // Find the score display owning the given resolved digit index (1-based, both backglass and DMD displays)
    const B2SScore* FindScoreDigitDisplay(int digit) const;
+   // Digits of the score text of each player (the sum over its displays in both windows)
+   std::map<int, int> m_playerDigits;
 
 public:
    const string m_version;
@@ -506,6 +684,7 @@ public:
    B2SImage m_backglassOnImage;
    B2SImage m_backglassOffImage;
    const B2SImage m_dmdImage;
+   const std::optional<vec4> m_canvasBacking; // B2S Pro: B2SProTransparentCanvasBacking, painted behind the backglass images
    const vector<B2SSound> m_sounds;
    const B2SReel m_reels;
    vector<B2SDMDDisplay> m_dmdDisplays; // <DMD> children of the <Displays> element (mutable: authored through the plugin UI)
@@ -515,8 +694,20 @@ public:
    vector<B2SAnimation> m_backglassAnimations;
    vector<std::unique_ptr<B2SBulb>> m_dmdIlluminations;
    vector<B2SAnimation> m_dmdAnimations;
+   // B2S Pro named-command targets, keyed by lower case trimmed name (read by the script thread, constant after load)
+   vector<B2SNamedPivot> m_namedPivots;
+   std::unordered_map<string, size_t> m_namedPivotTargets;
+   vector<B2SPositionGrid> m_positionGrids; // Runtime parts are render thread only
+   bool m_hasDynamicFront = false; // B2S Pro: some backglass bulb is a Dynamic Front light (only then do the snippets keep their pixels)
+   std::unordered_map<string, size_t> m_positionGridTargets;
    // Missing Scores
+
+private:
+   void RegisterNamedTargets(const tinyxml2::XMLNode& root);
 };
+
+// Lower case trimmed key of a B2S Pro command name (the reference compares trimmed names ignoring case)
+string B2SCommandKey(const string& name);
 
 
 // LED script API helpers (B2SSetLED/B2SSetLEDDisplay): convert a character or a Dream7 segment bit

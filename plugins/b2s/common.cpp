@@ -51,6 +51,11 @@ string string_to_lower(string str)
    return str;
 }
 
+bool IsB2SProFile(const std::filesystem::path& path)
+{
+   return string_to_lower(PluginStrings::PathToUTF8(path.extension())) == string_to_lower(string(B2SProFileExtension));
+}
+
 std::filesystem::path find_case_insensitive_file_path(const std::filesystem::path& searchedFile)
 {
    const std::filesystem::path found = PluginStrings::FindPathNoCase(searchedFile, false);

@@ -74,13 +74,13 @@ namespace
       info->info = nullptr;
    }
 
-   unsigned int MSGPIAPI SettingsItemCount(void*, const char*) { return 9; }
+   unsigned int MSGPIAPI SettingsItemCount(void*, const char*) { return 8; }
 
    void MSGPIAPI SettingsGetItems(void*, const char*, PagedUIItemDef* items)
    {
       int pos = 0;
       FillHeader(items[pos++], "Backglass Settings");
-      pos += B2SRenderer::FillSettingsItems(items + pos); // ShowGrill, DualMode, UpgradedSegmentRendering, KeepAspectRatio
+      pos += B2SRenderer::FillSettingsItems(items + pos); // ShowGrill, DualMode, UpgradedSegmentRendering
       PagedUIItemDef& ledType = items[pos++];
       ledType = {};
       ledType.type = PAGEDUI_ITEM_ENUM;
@@ -261,6 +261,13 @@ namespace
    {
       if (doc.path.empty())
          return 1;
+      // B2S Pro: .B2SPro files belong to the B2S Pro Designer. Rewriting one through tinyxml2 is not yet proven
+      // to keep it loadable by the Designer and the B2S Pro Server, so overlay edits are not saved into them.
+      if (IsB2SProFile(doc.path))
+      {
+         LOGW("DMD overlay edits are not saved into .B2SPro files: " + PluginStrings::PathToUTF8(doc.path));
+         return 1;
+      }
       {
          std::lock_guard lock(fileWriter.mutex);
          if (!fileWriter.thread.joinable())
@@ -303,7 +310,7 @@ void B2SServer::StopFileWriter()
 }
 
 B2SServer::B2SServer(const MsgPluginAPI* const msgApi, unsigned int endpointId, const VPXPluginAPI* const vpxApi, const PagedUIPluginAPI* const pagedUIApi, ScriptClassDef* serverClassDef)
-   : m_controllerClassProxy(msgApi, endpointId, "PinMAME_"s, "PinMAME_Controller"s, "B2S_"s, serverClassDef)
+   : m_controllerClassProxy(msgApi, endpointId, "PinMAME_"s, "PinMAME_Controller"s, "B2SPro_"s, serverClassDef)
    , m_controllerProxy(m_controllerClassProxy)
    , m_msgApi(msgApi)
    , m_endpointId(endpointId)
@@ -311,7 +318,7 @@ B2SServer::B2SServer(const MsgPluginAPI* const msgApi, unsigned int endpointId, 
    , m_pagedUIApi(pagedUIApi)
    , m_onGetAuxRendererId(msgApi->GetMsgID(VPXPI_NAMESPACE, VPXPI_MSG_GET_AUX_RENDERER))
    , m_onAuxRendererChgId(msgApi->GetMsgID(VPXPI_NAMESPACE, VPXPI_EVT_AUX_RENDERER_CHG))
-   , m_ancillaryRendererDef({ "B2S", "B2S Backglass & FullDMD", "Renderer for directb2s backglass files", this, OnRender })
+   , m_ancillaryRendererDef({ "B2SPro", "B2S Pro Backglass & FullDMD", "Renderer for B2SPro and directb2s backglass files", this, OnRender })
    , m_onStateChangeEventId(msgApi->GetMsgID("B2S", "OnStateChange:1"))
    , m_exposedControllers(msgApi, endpointId, CTLPI_CONTROLLERS_GET_MSG, CTLPI_CONTROLLERS_ON_CHG_MSG)
    , m_exposedStates(msgApi, endpointId, CTLPI_STATE_GET_SRC_MSG, CTLPI_STATE_ON_SRC_CHG_MSG)
@@ -447,21 +454,22 @@ std::shared_ptr<B2STable> B2SServer::LoadB2SFile(const std::filesystem::path& pa
    return b2s;
 }
 
-// Backglass file lookup: exact match on the table name, then 'foldername.directb2s' for file layouts
-// where the table shares a folder with its companion files (b2s, pup, flex, music, ...)
+// Backglass file lookup, in the order of the B2S Pro Server: the table name with .B2SPro, then with the legacy
+// .directb2s; only when neither exists, the name of the folder that holds the table (file layouts where the table
+// shares a folder with its companion files: b2s, pup, flex, music, ...) with .B2SPro, then .directb2s. The folder
+// name is a last resort so that it never takes the place of a file named after the table.
 std::filesystem::path B2SServer::FindB2SFile() const
 {
    const std::filesystem::path dir = m_workingDir.empty() ? m_tableDir : m_workingDir;
    if (dir.empty() || m_tableName.empty())
       return {};
-   const auto tryFile = [&dir](const string& name) { return name.empty() ? std::filesystem::path() : find_case_insensitive_file_path(dir / (name + ".directb2s"s)); };
 
-   if (auto file = tryFile(m_tableName); !file.empty())
-      return file;
+   const auto tryFile = [&dir](const string& name, const std::string_view extension) { return name.empty() ? std::filesystem::path() : find_case_insensitive_file_path(dir / (name + string(extension))); };
 
-   if (const string folderName = PluginStrings::PathToUTF8(dir.filename()); !folderName.empty())
-      if (auto file = tryFile(folderName); !file.empty())
-         return file;
+   for (const string& name : { m_tableName, PluginStrings::PathToUTF8(dir.filename()) })
+      for (const std::string_view extension : { B2SProFileExtension, LegacyDirectB2SFileExtension })
+         if (auto file = tryFile(name, extension); !file.empty())
+            return file;
 
    return {};
 }
@@ -475,6 +483,7 @@ void B2SServer::TryLoadB2S()
    if (b2sFilename.empty())
       return;
    m_b2sPath = b2sFilename;
+   LOGI("Loading backglass file: " + PluginStrings::PathToUTF8(b2sFilename));
    RegisterOverlaySheet();
    // B2S file format is heavily unoptimized so perform loading asynchronously (all assets are directly included in the XML file using Base64 encoding)
    m_loadedB2S = std::async(std::launch::async, LoadB2SFile, b2sFilename);
@@ -603,6 +612,9 @@ std::shared_ptr<B2STable> B2SServer::AcquireB2STable()
    if (!m_b2s && m_loadedB2S.valid() && m_loadedB2S.wait_for(std::chrono::seconds(0)) == std::future_status::ready)
    {
       m_b2s = m_loadedB2S.get();
+      // A file that could not be read was already reported by LoadB2SFile: there is nothing to set up
+      if (m_b2s == nullptr)
+         return m_b2s;
       // Document editing: the live configuration starts from the loaded file
       m_overlayDoc.displays = m_b2s->m_dmdDisplays;
       for (auto& display : m_overlayDoc.displays)
@@ -831,13 +843,15 @@ void B2SServer::B2SSetPos(int id, int xpos, int ypos)
 
 // B2SSetScore / B2SSetScorePlayer
 
-void B2SServer::ApplyScoreDigit(int digit, int value, bool roll)
+void B2SServer::ApplyScoreDigit(int digit, int value, bool roll, bool script)
 {
    if (auto it = m_scoreDigits.find(digit); it != m_scoreDigits.end())
    {
       it->second.value = value;
       it->second.roll = it->second.roll || roll;
       it->second.segMask = -1;
+      if (script)
+         it->second.scriptStamp = NextStamp();
    }
    else
    {
@@ -845,6 +859,8 @@ void B2SServer::ApplyScoreDigit(int digit, int value, bool roll)
       ScoreDigit& digitState = m_scoreDigits[digit];
       digitState.value = value;
       digitState.roll = roll;
+      if (script)
+         digitState.scriptStamp = NextStamp();
       UpdateStateSrc();
    }
 
@@ -953,12 +969,15 @@ void B2SServer::B2SSetScorePlayer(int playerno, int score)
 {
    if (auto it = m_playerScores.find(playerno); it != m_playerScores.end())
    {
-      it->second = score;
+      it->second.value = score;
+      it->second.stamp = NextStamp();
    }
    else
    {
       m_exposedStates.ClearItems();
-      m_playerScores[playerno] = score;
+      PlayerScore& player = m_playerScores[playerno];
+      player.value = score;
+      player.stamp = NextStamp();
       UpdateStateSrc();
    }
 
@@ -972,8 +991,24 @@ int B2SServer::GetPlayerScore(int player) const
    // - scripting API which guarantees single-threaded access on the MsgAPI thread, which is the thread where m_playerScores mutates
    // - Controller advertised state, which is accessed from any thread, but only when advertised. m_playerScores onyl mutates when states are NOT advertised
    const auto it = m_playerScores.find(player);
-   return it == m_playerScores.end() ? 0 : it->second.load();
+   return it == m_playerScores.end() ? 0 : it->second.value.load();
 }
+
+uint64_t B2SServer::GetPlayerScoreStamp(int player) const
+{
+   const auto it = m_playerScores.find(player);
+   return it == m_playerScores.end() ? 0 : it->second.stamp.load();
+}
+
+bool B2SServer::HasPlayerScore(int player) const { return m_playerScores.find(player) != m_playerScores.end(); }
+
+uint64_t B2SServer::GetScoreDigitStamp(int digit) const
+{
+   const auto it = m_scoreDigits.find(digit);
+   return it == m_scoreDigits.end() ? 0 : it->second.scriptStamp.load();
+}
+
+void B2SServer::SetRomScoreDigit(int digit, int value) { ApplyScoreDigit(digit, value, false, false); }
 
 
 // B2SSetData and helpers that are allowed to:
@@ -1028,6 +1063,14 @@ std::vector<std::pair<int, int>> B2SServer::DrainAnimationTriggers()
    return triggers;
 }
 
+std::vector<B2SServer::NamedMove> B2SServer::DrainNamedMoves()
+{
+   std::lock_guard lock(m_namedMoveMutex);
+   std::vector<NamedMove> moves;
+   moves.swap(m_pendingNamedMoves);
+   return moves;
+}
+
 void B2SServer::B2SSetData(const std::string& group, const std::string& value)
 {
    if (is_string_numeric(value, 0))
@@ -1041,6 +1084,25 @@ void B2SServer::B2SSetData(const std::string& group, int value)
    // external group writes both apply.
    if (group.empty())
       return;
+   // B2S Pro: position grid member names, then external pivot member names, are commands rather than illumination
+   // groups: a non zero value moves the representative, and the name never changes visibility (SV:2242-2247)
+   if (const std::shared_ptr<B2STable> b2s = [this]() { std::lock_guard lock(m_b2sMutex); return m_b2s; }(); b2s && (!b2s->m_positionGridTargets.empty() || !b2s->m_namedPivotTargets.empty()))
+   {
+      const string key = B2SCommandKey(group);
+      const auto grid = b2s->m_positionGridTargets.find(key);
+      const auto pivot = grid == b2s->m_positionGridTargets.end() ? b2s->m_namedPivotTargets.find(key) : b2s->m_namedPivotTargets.end();
+      if (grid != b2s->m_positionGridTargets.end() || pivot != b2s->m_namedPivotTargets.end())
+      {
+         if (value != 0)
+         {
+            std::lock_guard lock(m_namedMoveMutex);
+            if (m_pendingNamedMoves.size() < 1024) // Bound the queue when no backglass is rendering to drain it
+               m_pendingNamedMoves.push_back({ grid != b2s->m_positionGridTargets.end(), grid != b2s->m_positionGridTargets.end() ? grid->second : pivot->second, key,
+                  std::chrono::steady_clock::now() });
+         }
+         return;
+      }
+   }
    LampState& groupState = m_groupStates[group];
    groupState.value = static_cast<float>(value);
    groupState.stamp = ++m_lampStamp;
@@ -1063,7 +1125,7 @@ bool B2SServer::GetScriptedLampState(int b2sId, float& state, uint64_t* stamp) c
    return true;
 }
 
-bool B2SServer::GetBulbState(const B2SBulb& bulb, float& state, bool* fromLampChannel) const
+bool B2SServer::GetBulbState(const B2SBulb& bulb, float& state, bool* fromLampChannel, uint64_t* writeStamp) const
 {
    // Resolves the effective scripted state of a bulb: most recent write wins between its lamp channel, its
    // illumination group and the ROM state (the reference routes all of them through the same shared state).
@@ -1102,6 +1164,8 @@ bool B2SServer::GetBulbState(const B2SBulb& bulb, float& state, bool* fromLampCh
       scripted = false;
    if (fromLampChannel != nullptr)
       *fromLampChannel = lampWon;
+   if (writeStamp != nullptr)
+      *writeStamp = scripted ? stamp : 0;
    return scripted;
 }
 
@@ -1279,6 +1343,59 @@ void B2SServer::PulseSwitch(int switchId)
    };
    m_msgApi->RunOnMainThread(m_endpointId, 0., thunk, new std::pair<B2SServer*, int> { this, switchId });
    m_msgApi->RunOnMainThread(m_endpointId, 0.2, thunk, new std::pair<B2SServer*, int> { this, -switchId });
+}
+
+void B2SServer::SetControllerSwitch(int switchId, bool closed)
+{
+   if (m_setSwitchIndex < 0 || !HasController())
+      return;
+   ScriptVariant args[2];
+   args[0].vInt = switchId;
+   args[1].vBool = closed ? 1 : 0;
+   m_controllerProxy.ForwardCall(this, m_setSwitchIndex, args, nullptr);
+}
+
+void B2SServer::ReleaseHeldSwitches()
+{
+   for (const int id : m_heldSwitches)
+      SetControllerSwitch(id, false);
+   m_heldSwitches.clear();
+}
+
+void B2SServer::OnHoldCheck(void* data)
+{
+   B2SServer* const self = static_cast<B2SServer*>(data);
+   const auto remaining = self->m_holdDeadline - std::chrono::steady_clock::now();
+   if (remaining > std::chrono::milliseconds(1))
+   {
+      // A later pulse moved the deadline: wait for the rest of it
+      self->m_msgApi->RunOnMainThread(self->m_endpointId, std::chrono::duration<double>(remaining).count(), &B2SServer::OnHoldCheck, self);
+      return;
+   }
+   self->m_holdCheckPending = false;
+   self->ReleaseHeldSwitches();
+}
+
+// The reference closes the switch and (re)starts one 200 ms timer shared by every switch it pulses; when that timer elapses, all of
+// them open (B2SAnimation.SetSwitch, BA:1028-1055). Pulses closer than 200 ms apart merge into one closure for the game
+void B2SServer::HoldSwitch(int switchId)
+{
+   if (m_setSwitchIndex < 0 || !HasController())
+      return;
+   const auto hold = [](void* userData)
+   {
+      const auto ctx = static_cast<std::pair<B2SServer*, int>*>(userData);
+      B2SServer* const server = ctx->first;
+      server->SetControllerSwitch(ctx->second, true);
+      server->m_heldSwitches.insert(ctx->second);
+      server->m_holdDeadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(200);
+      delete ctx;
+      if (server->m_holdCheckPending)
+         return;
+      server->m_holdCheckPending = true;
+      server->m_msgApi->RunOnMainThread(server->m_endpointId, 0.2, &B2SServer::OnHoldCheck, server);
+   };
+   m_msgApi->RunOnMainThread(m_endpointId, 0., hold, new std::pair<B2SServer*, int> { this, switchId });
 }
 
 B2SAnimationEffects B2SServer::GetAnimationEffects()
