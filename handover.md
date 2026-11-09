@@ -323,8 +323,8 @@ across tables. Today:
 | Backglass Settings | Show Grill · Dual Mode · Upgraded segment rendering · **Keep aspect ratio** · **Center vertically** · Used LED type · **Strict file name match** |
 | Modify Backglass | Global animation slowdown · Per-animation slowdowns · (the `Edit "…"` sheet is appended by the host) |
 
-Changelog entries for the renderer work: `docs/Changelog.txt` (the KeepAspectRatio entries in FEATURES,
-the DMD quad placement fix in FIXES.
+Changelog entries for the renderer work: `docs/Changelog.txt` (the KeepAspectRatio entries in FEATURES
+and the DMD quad placement fix in FIXES).
 
 ---
 
