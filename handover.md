@@ -165,8 +165,10 @@ window/image ratio to 1, the black area from nothing to its full width, both lin
 `m_layoutOX` / `m_layoutOY` and everything built on them (bulbs, reels, seg displays, the DMD quad of
 stage 8, the four padding strips) follow the same value with no extra code. See §7 for the numbers.
 
-The setting id stays `KeepAspectRatio`, its storage type moves from bool to int (`MSGPI_INT_VAL_SETTING`,
-`PAGEDUI_ITEM_INT` slider with a `%d %%` format); the settings page keeps 11 items in the same order.
+It is an int setting and an int slider (`MSGPI_INT_VAL_SETTING`, `PAGEDUI_ITEM_INT`, `%d %%` format); the
+settings page keeps 11 items in the same order. The id is **`KeepAspectRatioPercent`**, deliberately not the
+old `KeepAspectRatio`: the host stores the old switch as a bool under that id, and reading a stored 0/1 back
+as a percentage would hand everybody who used the switch an aspect ratio kept by 0 % (stretched) or 1 %.
 
 ---
 
