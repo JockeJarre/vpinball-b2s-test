@@ -233,6 +233,10 @@ FEATURES:
 
 FIXES:
 
+- B2S Pro plugin: fix the DMD overlays of a .B2SPro/.directb2s document showing at the wrong height when
+  'Keep aspect ratio' is turned on: the render quad of a display is measured bottom-up, so the vertical
+  placement of the content on the padded surface has to be subtracted there, not added
+
 - fix SMAA looking worse compared to 10.7.X, and slightly improve its quality in general
 
 - fix wrong primitive animation when using the endless-loop function (removing the need for NFozzy's workaround via script)
