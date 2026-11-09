@@ -1,6 +1,6 @@
 # B2S Pro — KeepAspectRatio handover
 
-Date: 2026-11-08 · Branch `b2s-pro`, code tip `1a1baa010` (this document and its updates on top)
+Date: 2026-11-09 · Branch `b2s-pro`, code tip `cae1a15e6` (this document and its updates on top)
 · Repo `JockeJarre/vpinball-b2s-test`
 
 ---
@@ -23,6 +23,7 @@ Date: 2026-11-08 · Branch `b2s-pro`, code tip `1a1baa010` (this document and it
 | `4eb064b7b` | 18:26 | Content **centered horizontally**, no setting for it; `DrawBackgroundPatch` double-offset fix |
 | `79cb1f491` | 19:22 | handover: the save target of the DMD overlay edits spelled out |
 | `1a1baa010` | 19:33 | **`Strict file name match`** setting: loose backglass file matching, table name matched up to its first `)` (§4) |
+| `cae1a15e6` | 11:54 | **Fix**: DMD overlays at the wrong height with `Keep aspect ratio` on (§2, stage 8) |
 
 `git diff --stat 9a111ce35^..HEAD` — 19 files, +275 / −94.
 
@@ -112,6 +113,33 @@ m_layoutOX = 0.5f * (m_padW - contentW);                 // always centered, no 
 * Applied through `ContentX()` / `ContentY()` at the drawing sites, `SetViewOffset(ox, oy)` on the
   segment displays and the DMD overlays, `ox`/`oy` in `SegGraphics::DrawToContext`; the padding is
   filled on the four sides of the placed content. Settings: 9 → 10 page items.
+
+---
+
+### Stage 8 — the DMD overlay quad is bottom-up (`cae1a15e6`)
+
+Test report on the 2560 × 2880 display: with `Keep aspect ratio` **on**, the DMD of the document
+showed at the wrong position; with the setting off (zero offset) it was fine.
+
+`DrawImage` takes its destination rectangle **top-down**, and the plugin draws in authored top-down
+units — which is why `m_layoutOX` / `m_layoutOY` are plain additions everywhere. `DrawDisplay` (the
+DMD glass + emitter quad) is fed a **bottom-up** quad: `DMDOverlay::Render` flips the authored bounds
+through the surface (`srcHeight - y - h`) before calling it. Adding a top-down placement offset there
+moves the DMD **the double** of the border height away from its authored row; it has to be
+**subtracted**, horizontally unchanged (no flip):
+
+```cpp
+frame = vec4<int>(display.x + viewOX, int(ctx->srcHeight) - display.y - display.h - viewOY, display.w, display.h);
+```
+
+Applied where the quad is built, not at the `DrawDisplay` call site, so the "fully clipped away" test
+right below compares the coordinates the quad actually uses.
+
+Scope: **only the B2S Pro plugin.** `plugins/b2s/DMDOverlay/` and `plugins/pup/DMDOverlay/` are two
+copies of one shared folder (by design, one per plugin); only the B2S copy carries the view offsets,
+the PUP copy is untouched and has none. Nothing outside `plugins/b2s/` is touched by the
+KeepAspectRatio work, and on this branch `plugins/b2s/` is built solely as
+`plugins/b2s-pro/plugin-b2spro64`.
 
 ---
 
@@ -241,17 +269,16 @@ with zipfile.ZipFile("b2s-pro-windows-x64-<sha>.zip", "w", zipfile.ZIP_DEFLATED)
 EOF
 ```
 
-Artifacts dropped on the share (x64, commit `1a1baa010`):
+Artifacts dropped on the share (x64, commit `cae1a15e6`, **zip only** — no unpacked folder, no
+handover copy for this round):
 
 ```
-/mnt/pinball/B2Spro/b2s-pro-windows-x64-1a1baa010.zip   9.08 MB  md5 a63afc302b1ca5c67663e1923175734f
-/mnt/pinball/B2Spro/b2s-pro-1a1baa010/                  unpacked, drop-in ready
+/mnt/pinball/B2Spro/b2s-pro-windows-x64-cae1a15e6.zip   9.08 MB  md5 2c6e02b591b508ba4ea82bb39634f9f9
     plugin-b2spro64.dll   plugin.cfg
     libgcc_s_seh-1.dll    libstdc++-6.dll    libwinpthread-1.dll
 ```
 
-Install as `plugins/b2s-pro/`. The `4eb064b7b` artifacts were removed from the share (same renderer,
-they lack the file-name matching).
+Install as `plugins/b2s-pro/`. The `1a1baa010` artifacts are gone from the share.
 
 ---
 
@@ -293,14 +320,18 @@ Verdict: near-identical siblings from the same `Update for B2S pro` base.
    geometry, with and without `Center vertically`.
 2. **Test the loose file matching** (`1a1baa010`): `Big Guns (Williams 1987)1-1.vpx` on the share,
    with the backglass of the pair name next to it, strict off — and confirm strict on finds nothing.
-3. **CI**: raise the Actions spending limit, or move the job to `ubuntu-latest` + mingw.
-4. Rebuild the Windows artifacts after any further renderer change (only the mingw ones are current).
-5. Cherry-pick the final commits onto the main `vpinball` repo branch `b2s-keep-aspect-ratio`.
-6. Decide on the 6 upstream fix/diagnostics cherry-picks (§8).
-7. **Open decision, closed on review**: saving a document loaded from a legacy `.directb2s` into a
+3. **Test the DMD placement fix** (`cae1a15e6`): AFM `<DMD Target="Backglass" X=481 Y=1243 W=1038
+   H=208>` on the 2560 × 2880 display, `Keep aspect ratio` on, `Center vertically` on **and** off —
+   the DMD rows must sit at 79–93 % of the art in both cases, and a ScoreView target display must land
+   in the middle of its own window.
+4. **CI**: raise the Actions spending limit, or move the job to `ubuntu-latest` + mingw.
+5. Rebuild the Windows artifacts after any further renderer change (only the mingw ones are current).
+6. Cherry-pick the final commits onto the main `vpinball` repo branch `b2s-keep-aspect-ratio`.
+7. Decide on the 6 upstream fix/diagnostics cherry-picks (§8).
+8. **Open decision, closed on review**: saving a document loaded from a legacy `.directb2s` into a
    `.B2SPro` sibling (`4d51d1684`) was implemented, reviewed and **dropped** — saves stay in the
    loaded file (§3).
-8. `resources/` is untracked; add `.gitattributes` and commit if the samples should live in the repo.
+9. `resources/` is untracked; add `.gitattributes` and commit if the samples should live in the repo.
 
 ---
 
