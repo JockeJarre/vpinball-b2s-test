@@ -269,8 +269,7 @@ with zipfile.ZipFile("b2s-pro-windows-x64-<sha>.zip", "w", zipfile.ZIP_DEFLATED)
 EOF
 ```
 
-Artifacts dropped on the share (x64, commit `cae1a15e6`, **zip only** — no unpacked folder, no
-handover copy for this round):
+Artifacts dropped on the share (x64, commit `cae1a15e6`, **zip only** — no unpacked folder):
 
 ```
 /mnt/pinball/B2Spro/b2s-pro-windows-x64-cae1a15e6.zip   9.08 MB  md5 2c6e02b591b508ba4ea82bb39634f9f9
@@ -311,9 +310,25 @@ Verdict: near-identical siblings from the same `Update for B2S pro` base.
   `9bf69cbc0`, `86d2b4549`, `b8fda591f`.
 * The upstream sequence semantics (`B2SProSequence.cpp`) are still to be studied before any merge.
 
+## 9. Settings page (`cae1a15e6`)
+
+Once a backglass file is loaded the plugin replaces its implicit settings page with a sectioned
+**Backglass Settings** sheet — 11 items under 2 headers — and registers the **`Edit "<file>"`** sheet
+(the DMD overlay editor: position, size, style, dots, tint, glass, bounds detection, save) below it.
+All items are `PAGEDUI_STORAGE_HOST`, keyed by the plugin id `B2SPro`, so they persist in the host
+across tables. Today:
+
+| Header | Items |
+|---|---|
+| Backglass Settings | Show Grill · Dual Mode · Upgraded segment rendering · **Keep aspect ratio** · **Center vertically** · Used LED type · **Strict file name match** |
+| Modify Backglass | Global animation slowdown · Per-animation slowdowns · (the `Edit "…"` sheet is appended by the host) |
+
+Changelog entries for the renderer work: `docs/Changelog.txt` (the KeepAspectRatio entries in FEATURES,
+the DMD quad placement fix in FIXES.
+
 ---
 
-## 9. Open items
+## 10. Open items
 
 1. **Test on the real display** (`4eb064b7b`): round stays round, nothing cropped, black only in the
    leftover area, AFM DMD rows 79–93 % fully visible, grill shown/hidden → identical border
@@ -332,12 +347,3 @@ Verdict: near-identical siblings from the same `Update for B2S pro` base.
    `.B2SPro` sibling (`4d51d1684`) was implemented, reviewed and **dropped** — saves stay in the
    loaded file (§3).
 9. `resources/` is untracked; add `.gitattributes` and commit if the samples should live in the repo.
-
----
-
-## 10. Settings today (backglass page, 11 items)
-
-Show Grill · Dual Mode · Upgraded segment rendering · **Keep aspect ratio** · **Center vertically**
-· Used LED type · **Strict file name match** · All slowdown · Slowdowns · (2 section headers)
-
-Changelog entries: `docs/Changelog.txt` lines 19–34.
