@@ -1,6 +1,6 @@
 # B2S Pro — KeepAspectRatio handover
 
-Date: 2026-11-09 · Branch `b2s-pro`, code tip `4379a0953` (this document and its updates on top)
+Date: 2026-11-09 · Branch `b2s-pro`, code tip `f1ea3dd5f` (this document and its updates on top)
 · Repo `JockeJarre/vpinball-b2s-test`
 
 ---
@@ -24,7 +24,7 @@ Date: 2026-11-09 · Branch `b2s-pro`, code tip `4379a0953` (this document and it
 | `79cb1f491` | 19:22 | handover: the save target of the DMD overlay edits spelled out |
 | `1a1baa010` | 19:33 | **`Strict file name match`** setting: loose backglass file matching, table name matched up to its first `)` (§4) |
 | `cae1a15e6` | 11:54 | **Fix**: DMD overlays at the wrong height with `Keep aspect ratio` on (§2, stage 8) |
-| `4379a0953` | 12:19 | **`Keep aspect ratio`** becomes a percentage 0..100 (§2, stage 9) |
+| `f1ea3dd5f` | 12:19 | **`Keep aspect ratio`** becomes a percentage 0..100 (§2, stage 9) |
 
 `git diff --stat 9a111ce35^..HEAD` — 19 files, +275 / −94.
 
@@ -144,7 +144,7 @@ KeepAspectRatio work, and on this branch `plugins/b2s/` is built solely as
 
 ---
 
-### Stage 9 — a percentage control (`4379a0953`)
+### Stage 9 — a percentage control (`f1ea3dd5f`)
 
 The switch became a slider: **`Keep aspect ratio` 0..100** (int setting, host storage, default 100).
 `0` is the plain stretch, `100` the full fit of stage 6, and in between the padding that the full fit
@@ -296,10 +296,10 @@ with zipfile.ZipFile("b2s-pro-windows-x64-<sha>.zip", "w", zipfile.ZIP_DEFLATED)
 EOF
 ```
 
-Artifacts dropped on the share (x64, commit `4379a0953`, **zip only** — no unpacked folder):
+Artifacts dropped on the share (x64, commit `f1ea3dd5f`, **zip only** — no unpacked folder):
 
 ```
-/mnt/pinball/B2Spro/b2s-pro-windows-x64-4379a0953.zip   9.08 MB
+/mnt/pinball/B2Spro/b2s-pro-windows-x64-f1ea3dd5f.zip   9.08 MB
     plugin-b2spro64.dll   plugin.cfg
     libgcc_s_seh-1.dll    libstdc++-6.dll    libwinpthread-1.dll
 ```
@@ -358,7 +358,7 @@ and the DMD quad placement fix in FIXES).
 
 ## 10. Open items
 
-1. **Test on the real display** (`4379a0953`): round stays round at **100**, nothing is cropped, black
+1. **Test on the real display** (`f1ea3dd5f`): round stays round at **100**, nothing is cropped, black
    only in the leftover area, and the value walks smoothly down to 0 (window filled, stretched) with
    `Center vertically` on **and** off. Grill shown/hidden → identical border geometry at 100.
 2. **Test the loose file matching** (`1a1baa010`): `Big Guns (Williams 1987)1-1.vpx` on the share,
