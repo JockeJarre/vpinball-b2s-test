@@ -1,6 +1,6 @@
 # B2S Pro — KeepAspectRatio handover
 
-Date: 2026-11-09 · Branch `b2s-pro`, code tip `cae1a15e6` (this document and its updates on top)
+Date: 2026-11-09 · Branch `b2s-pro`, code tip `4379a0953` (this document and its updates on top)
 · Repo `JockeJarre/vpinball-b2s-test`
 
 ---
@@ -24,6 +24,7 @@ Date: 2026-11-09 · Branch `b2s-pro`, code tip `cae1a15e6` (this document and it
 | `79cb1f491` | 19:22 | handover: the save target of the DMD overlay edits spelled out |
 | `1a1baa010` | 19:33 | **`Strict file name match`** setting: loose backglass file matching, table name matched up to its first `)` (§4) |
 | `cae1a15e6` | 11:54 | **Fix**: DMD overlays at the wrong height with `Keep aspect ratio` on (§2, stage 8) |
+| `4379a0953` | 12:19 | **`Keep aspect ratio`** becomes a percentage 0..100 (§2, stage 9) |
 
 `git diff --stat 9a111ce35^..HEAD` — 19 files, +275 / −94.
 
@@ -140,6 +141,32 @@ copies of one shared folder (by design, one per plugin); only the B2S copy carri
 the PUP copy is untouched and has none. Nothing outside `plugins/b2s/` is touched by the
 KeepAspectRatio work, and on this branch `plugins/b2s/` is built solely as
 `plugins/b2s-pro/plugin-b2spro64`.
+
+---
+
+### Stage 9 — a percentage control (`4379a0953`)
+
+The switch became a slider: **`Keep aspect ratio` 0..100** (int setting, host storage, default 100).
+`0` is the plain stretch, `100` the full fit of stage 6, and in between the padding that the full fit
+needs is applied that part of the way — the one place the value enters is the surface padding, so the
+whole renderer keeps working in authored units:
+
+```cpp
+const float fitW = wideContent ? contentW : contentH * wndAspect;   // the stage 6 surface
+const float fitH = wideContent ? contentW / wndAspect : contentH;
+const float part = (keep >= 100) ? 1.f : (0.01f * static_cast<float>(keep));
+ctx->srcWidth = m_padW = contentW + part * (fitW - contentW);
+ctx->srcHeight = m_padH = contentH + part * (fitH - contentH);
+```
+
+Both endpoints are exact and everything between is monotonic: the two axis scale factors run from the
+window/image ratio to 1, the black area from nothing to its full width, both linearly in the value
+(the distortion itself is not linear in the value — it is a ratio of the two interpolated scales).
+`m_layoutOX` / `m_layoutOY` and everything built on them (bulbs, reels, seg displays, the DMD quad of
+stage 8, the four padding strips) follow the same value with no extra code. See §7 for the numbers.
+
+The setting id stays `KeepAspectRatio`, its storage type moves from bool to int (`MSGPI_INT_VAL_SETTING`,
+`PAGEDUI_ITEM_INT` slider with a `%d %%` format); the settings page keeps 11 items in the same order.
 
 ---
 
@@ -269,15 +296,15 @@ with zipfile.ZipFile("b2s-pro-windows-x64-<sha>.zip", "w", zipfile.ZIP_DEFLATED)
 EOF
 ```
 
-Artifacts dropped on the share (x64, commit `cae1a15e6`, **zip only** — no unpacked folder):
+Artifacts dropped on the share (x64, commit `4379a0953`, **zip only** — no unpacked folder):
 
 ```
-/mnt/pinball/B2Spro/b2s-pro-windows-x64-cae1a15e6.zip   9.08 MB  md5 2c6e02b591b508ba4ea82bb39634f9f9
+/mnt/pinball/B2Spro/b2s-pro-windows-x64-4379a0953.zip   9.08 MB
     plugin-b2spro64.dll   plugin.cfg
     libgcc_s_seh-1.dll    libstdc++-6.dll    libwinpthread-1.dll
 ```
 
-Install as `plugins/b2s-pro/`. The `1a1baa010` artifacts are gone from the share.
+Install as `plugins/b2s-pro/`. The `cae1a15e6` artifacts are gone from the share.
 
 ---
 
@@ -290,6 +317,7 @@ Install as `plugins/b2s-pro/`. The `1a1baa010` artifacts are gone from the share
 | AFM — img 2000 × 1565, grill shown | needs 15.11 % per side (grill-hidden must match) |
 | 16:9 art on a 4:3 window | needs 12.50 % (reference for the old 5 % cap) |
 | AFM dot matrix | `X=481 Y=1243 W=1038 H=208` → rows 79 %..93 % of 1565 px |
+| **`Keep aspect ratio` morph** — `300` (2500 × 2200, aspect 1.136) on 2560 × 2880 | value 0: window filled, height/width scale ratio 1.278 · 25: 93.5 % high, 3.3 % borders, 1.195 · 50: 87.8 %, 6.1 %, 1.122 · 75: 82.7 %, 8.6 %, 1.058 · 100: 78.2 %, 10.9 %, 1.000 (no distortion) |
 | Hurricane (Cyclone) screenshot | window 1307 × 1468 (0.8903), content 1.0802 → 8.7 % top/bottom; the wheel in the image is 579 × 569 (1.0176), i.e. near square, so a stretch is obvious to the eye |
 
 Sample files: `resources/backglass/` (`300 (Gottlieb 1975).B2SPro`, `Attack from Mars (Bally 1995)
@@ -320,7 +348,7 @@ across tables. Today:
 
 | Header | Items |
 |---|---|
-| Backglass Settings | Show Grill · Dual Mode · Upgraded segment rendering · **Keep aspect ratio** · **Center vertically** · Used LED type · **Strict file name match** |
+| Backglass Settings | Show Grill (bool) · Dual Mode (enum) · Upgraded segment rendering (bool) · **Keep aspect ratio (%)** (int slider 0..100, default 100) · **Center vertically** (bool) · Used LED type (enum) · **Strict file name match** (bool) |
 | Modify Backglass | Global animation slowdown · Per-animation slowdowns · (the `Edit "…"` sheet is appended by the host) |
 
 Changelog entries for the renderer work: `docs/Changelog.txt` (the KeepAspectRatio entries in FEATURES
@@ -330,15 +358,15 @@ and the DMD quad placement fix in FIXES).
 
 ## 10. Open items
 
-1. **Test on the real display** (`4eb064b7b`): round stays round, nothing cropped, black only in the
-   leftover area, AFM DMD rows 79–93 % fully visible, grill shown/hidden → identical border
-   geometry, with and without `Center vertically`.
+1. **Test on the real display** (`4379a0953`): round stays round at **100**, nothing is cropped, black
+   only in the leftover area, and the value walks smoothly down to 0 (window filled, stretched) with
+   `Center vertically` on **and** off. Grill shown/hidden → identical border geometry at 100.
 2. **Test the loose file matching** (`1a1baa010`): `Big Guns (Williams 1987)1-1.vpx` on the share,
    with the backglass of the pair name next to it, strict off — and confirm strict on finds nothing.
 3. **Test the DMD placement fix** (`cae1a15e6`): AFM `<DMD Target="Backglass" X=481 Y=1243 W=1038
-   H=208>` on the 2560 × 2880 display, `Keep aspect ratio` on, `Center vertically` on **and** off —
-   the DMD rows must sit at 79–93 % of the art in both cases, and a ScoreView target display must land
-   in the middle of its own window.
+   H=208>` on the 2560 × 2880 display, `Keep aspect ratio` at 100 **and** at 50, `Center vertically`
+   on **and** off — the DMD rows must sit at 79–93 % of the art, and a ScoreView target display must
+   land in the middle of its own window.
 4. **CI**: raise the Actions spending limit, or move the job to `ubuntu-latest` + mingw.
 5. Rebuild the Windows artifacts after any further renderer change (only the mingw ones are current).
 6. Cherry-pick the final commits onto the main `vpinball` repo branch `b2s-keep-aspect-ratio`.

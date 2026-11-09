@@ -20,8 +20,10 @@ FEATURES:
   images in their window at their authored aspect ratio. The drawing surface (the fictitious screen the plugin
   renders on) is padded to the shape of the window, so that the host scales both axes by the same factor: the
   image keeps its shape, a round bulb stays round, nothing is cropped, and the padded area is left black. The
-  content is centered horizontally, and vertically as the 'Center vertically' setting says. Turn it off
-  to stretch the images over the whole window
+  content is centered horizontally, and vertically as the 'Center vertically' setting says. It is a percentage
+  of this fit: 0 turns it off and stretches the images over the whole window, 100 keeps the aspect ratio fully,
+  and in between the black area and the leftover distortion are applied that part of the way (50: half the
+  black area, half the distortion)
 - B2S plugin: add a 'Center vertically' setting (plugin settings page) for the black area left by 'Keep aspect
   ratio': centered (default) puts the image in the middle of the window, turned off it sticks the image to the
   bottom of the window, the black area going on its top

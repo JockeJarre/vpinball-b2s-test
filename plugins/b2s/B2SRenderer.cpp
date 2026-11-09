@@ -20,8 +20,15 @@ static inline float InvsRGB(const float x) { return (x <= 0.04045f) ? (x * (floa
 MSGPI_BOOL_VAL_SETTING(showGrillProp, "ShowGrill", "Show Grill", "Show Grill", true, false);
 MSGPI_BOOL_VAL_SETTING(upgradedSegRenderingProp, "UpgradedSegmentRendering", "Upgraded segment rendering",
    "Render LED score displays with the upgraded segment renderer (turn off for the original B2S segment rendering)", true, true);
-MSGPI_BOOL_VAL_SETTING(keepAspectRatioProp, "KeepAspectRatio", "Keep aspect ratio",
-   "Fit the backglass and score view images in their window at their authored aspect ratio, leaving the leftover area black (turn off to stretch the images over the whole window)", true, false);
+// The setting id is new on purpose: the switch this setting was before is stored as a bool under
+// "KeepAspectRatio", and reading that 0/1 back as a percentage would silently give "off" (0 %) or
+// "1 %" to everybody who used the switch.
+MSGPI_INT_VAL_SETTING(keepAspectRatioProp, "KeepAspectRatioPercent", "Keep aspect ratio (%)",
+   "Fit the backglass and score view images in their window at their authored aspect ratio, leaving the "
+   "leftover area black: 100 keeps the aspect ratio fully (the image is never distorted, the black area is "
+   "at its widest), 0 turns it off and stretches the images over the whole window, in between the padding "
+   "and the leftover distortion are applied that part of the way (50: half the black area, half the "
+   "distortion)", true, 0, 100, 100);
 MSGPI_BOOL_VAL_SETTING(centerVerticallyProp, "CenterVertically", "Center vertically",
    "Center the images vertically in the black area left by 'Keep aspect ratio' (turn off to put them on the floor)", true, true);
 
@@ -188,7 +195,7 @@ namespace
    int MSGPIAPI UpgradedSegGet(void*) { return upgradedSegRenderingProp_Get(); }
    void MSGPIAPI UpgradedSegSet(void*, int v) { upgradedSegRenderingProp_Set(v); }
    int MSGPIAPI KeepAspectRatioGet(void*) { return keepAspectRatioProp_Get(); }
-   void MSGPIAPI KeepAspectRatioSet(void*, int v) { keepAspectRatioProp_Set(v); }
+   void MSGPIAPI KeepAspectRatioSet(void*, int v) { keepAspectRatioProp_Set(std::max(0, std::min(100, v))); }
    int MSGPIAPI CenterVerticallyGet(void*) { return centerVerticallyProp_Get(); }
    void MSGPIAPI CenterVerticallySet(void*, int v) { centerVerticallyProp_Set(v); }
 }
@@ -217,17 +224,20 @@ int B2SRenderer::FillSettingsItems(PagedUIItemDef* items)
    items[2].storage = PAGEDUI_STORAGE_HOST;
    items[2].boolProp = { 1, &UpgradedSegGet, &UpgradedSegSet };
    items[3] = {};
-   items[3].type = PAGEDUI_ITEM_BOOL;
-   items[3].id = "KeepAspectRatio";
+   items[3].type = PAGEDUI_ITEM_INT;
+   items[3].id = "KeepAspectRatioPercent";
    items[3].label = "Keep aspect ratio";
-   items[3].tooltip = "Fit the backglass and score view images in their window at their authored aspect ratio, leaving the leftover area black (turn off to stretch the images over the whole window)";
+   items[3].tooltip = "Fit the backglass and score view images in their window at their authored aspect ratio, leaving the "
+      "leftover area black: 100 keeps the aspect ratio fully (the image is never distorted, the black area is at its widest), "
+      "0 turns it off and stretches the images over the whole window, in between the black area and the leftover distortion "
+      "are applied that part of the way (50: half the black area, half the distortion)";
    items[3].storage = PAGEDUI_STORAGE_HOST;
-   items[3].boolProp = { 0, &KeepAspectRatioGet, &KeepAspectRatioSet };
+   items[3].intProp = { 0, 100, 100, "%d %%", &KeepAspectRatioGet, &KeepAspectRatioSet };
    items[4] = {};
    items[4].type = PAGEDUI_ITEM_BOOL;
    items[4].id = "CenterVertically";
    items[4].label = "Center vertically";
-   items[4].tooltip = "Center the images vertically in the black area left by 'Keep aspect ratio' (turn off to put them on the floor)";
+   items[4].tooltip = "Center the images vertically in the black area left by 'Keep aspect ratio' (turn off to put them on the floor). At 0 the black area is empty, at 50 its half width goes above the image";
    items[4].storage = PAGEDUI_STORAGE_HOST;
    items[4].boolProp = { 1, &CenterVerticallyGet, &CenterVerticallySet };
    return 5;
@@ -238,10 +248,15 @@ int B2SRenderer::FillSettingsItems(PagedUIItemDef* items)
 // that both axes scale by the very same factor: the authored content keeps its shape (a round bulb stays
 // round, the image is not stretched) and the padding stays black. Nothing else has to be known by the
 // drawing code, it keeps working in the image authored units.
+//
+// The setting is a percentage of this fit: the padding the full fit needs is applied that part of the way,
+// which takes both axes scale factors from the window/image ratio to 1 and the black area from nothing to
+// its full width, the two ends met at 0 (plain stretch) and 100 (aspect ratio fully kept).
 void B2SRenderer::FitSurfaceToWindow(VPXRenderContext2D* ctx, const float contentW, const float contentH)
 {
    m_padW = m_padH = 0.f;
-   if (!keepAspectRatioProp_Get() || contentW <= 0.f || contentH <= 0.f || ctx->outWidth <= 0.f || ctx->outHeight <= 0.f)
+   const int keep = keepAspectRatioProp_Get();
+   if (keep <= 0 || contentW <= 0.f || contentH <= 0.f || ctx->outWidth <= 0.f || ctx->outHeight <= 0.f)
    {
       ctx->srcWidth = contentW;
       ctx->srcHeight = contentH;
@@ -249,8 +264,12 @@ void B2SRenderer::FitSurfaceToWindow(VPXRenderContext2D* ctx, const float conten
    }
 
    const float wndAspect = ctx->outWidth / ctx->outHeight;
-   ctx->srcWidth = m_padW = (contentW / contentH > wndAspect) ? contentW : contentH * wndAspect;
-   ctx->srcHeight = m_padH = (contentW / contentH > wndAspect) ? contentW / wndAspect : contentH;
+   const bool wideContent = (contentW / contentH > wndAspect);
+   const float fitW = wideContent ? contentW : contentH * wndAspect;
+   const float fitH = wideContent ? contentW / wndAspect : contentH;
+   const float part = (keep >= 100) ? 1.f : (0.01f * static_cast<float>(keep));
+   ctx->srcWidth = m_padW = contentW + part * (fitW - contentW);
+   ctx->srcHeight = m_padH = contentH + part * (fitH - contentH);
    m_contentW = contentW;
    m_contentH = contentH;
    // Vertical placement of the content in the surface: centered, or stuck on the floor. The content is drawn
