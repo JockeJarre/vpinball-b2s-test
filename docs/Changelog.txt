@@ -27,6 +27,10 @@ FEATURES:
 - B2S plugin: add a 'Center vertically' setting (plugin settings page) for the black area left by 'Keep aspect
   ratio': centered (default) puts the image in the middle of the window, turned off it sticks the image to the
   bottom of the window, the black area going on its top
+- B2S Pro: new 'Transparent parts shine through' setting (off by default). Turned on, the plugin leaves the areas its images leave
+  transparent unpainted: no authored backing color is drawn under the artwork, and the 'Keep aspect ratio' leftover area is not
+  painted black, so what the window shows there can stay visible. Turned off the view is kept fully opaque: the authored backing
+  color under the artwork, the leftover area black
 - B2S Pro: .B2SPro documents are edited and saved exactly like the legacy .directb2s ones
 - B2S Pro: new 'Strict file name match' setting (on by default). Turned off, a table with no backglass named
   exactly after it is matched through its first closing parenthesis, the 'FlipperName (Company Year)' the

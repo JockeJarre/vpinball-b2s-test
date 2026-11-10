@@ -31,6 +31,10 @@ MSGPI_INT_VAL_SETTING(keepAspectRatioProp, "KeepAspectRatioPercent", "Keep aspec
    "distortion)", true, 0, 100, 100);
 MSGPI_BOOL_VAL_SETTING(centerVerticallyProp, "CenterVertically", "Center vertically",
    "Center the images vertically in the black area left by 'Keep aspect ratio' (turn off to put them on the floor)", true, true);
+MSGPI_BOOL_VAL_SETTING(shineThroughProp, "ShineThrough", "Transparent parts shine through",
+   "Leave the areas the backglass images leave transparent unpainted: the plugin draws no backing color under the artwork and "
+   "keeps the area around it (the 'Keep aspect ratio' leftover) unpainted, so what the window shows there stays visible. Turned "
+   "off the view stays fully opaque: the authored backing color under the artwork, the leftover area black", true, false);
 
 static const char* dualModeValues[] = { "Authentic", "Fantasy" };
 MSGPI_ENUM_VAL_SETTING(dualModeProp, "DualMode", "Dual Mode", "Active mode for dual backglasses (authentic or fantasy)", true, 1, 2, dualModeValues, 1);
@@ -184,6 +188,7 @@ void B2SRenderer::RegisterSettings(const MsgPluginAPI* const msgApi, unsigned in
    msgApi->RegisterSetting(endpointId, &upgradedSegRenderingProp);
    msgApi->RegisterSetting(endpointId, &keepAspectRatioProp);
    msgApi->RegisterSetting(endpointId, &centerVerticallyProp);
+   msgApi->RegisterSetting(endpointId, &shineThroughProp);
 }
 
 namespace
@@ -198,6 +203,8 @@ namespace
    void MSGPIAPI KeepAspectRatioSet(void*, int v) { keepAspectRatioProp_Set(std::max(0, std::min(100, v))); }
    int MSGPIAPI CenterVerticallyGet(void*) { return centerVerticallyProp_Get(); }
    void MSGPIAPI CenterVerticallySet(void*, int v) { centerVerticallyProp_Set(v); }
+   int MSGPIAPI ShineThroughGet(void*) { return shineThroughProp_Get(); }
+   void MSGPIAPI ShineThroughSet(void*, int v) { shineThroughProp_Set(v); }
 }
 
 int B2SRenderer::FillSettingsItems(PagedUIItemDef* items)
@@ -240,7 +247,16 @@ int B2SRenderer::FillSettingsItems(PagedUIItemDef* items)
    items[4].tooltip = "Center the images vertically in the black area left by 'Keep aspect ratio' (turn off to put them on the floor). At 0 the black area is empty, at 50 its half width goes above the image";
    items[4].storage = PAGEDUI_STORAGE_HOST;
    items[4].boolProp = { 1, &CenterVerticallyGet, &CenterVerticallySet };
-   return 5;
+   items[5] = {};
+   items[5].type = PAGEDUI_ITEM_BOOL;
+   items[5].id = "ShineThrough";
+   items[5].label = "Transparent parts shine through";
+   items[5].tooltip = "Leave the areas the backglass images leave transparent unpainted: the plugin draws no backing color under the "
+      "artwork and keeps the area around it (the 'Keep aspect ratio' leftover) unpainted, so what the window shows there stays visible. "
+      "Turned off the view stays fully opaque: the authored backing color under the artwork, the leftover area black";
+   items[5].storage = PAGEDUI_STORAGE_HOST;
+   items[5].boolProp = { 0, &ShineThroughGet, &ShineThroughSet };
+   return 6;
 }
 
 // KeepAspectRatio rendering: the host stretches the source surface (the fictitious screen the plugin draws
@@ -281,9 +297,12 @@ void B2SRenderer::FitSurfaceToWindow(VPXRenderContext2D* ctx, const float conten
 }
 
 // The padding is painted over once the frame is drawn: animations, illuminations and score displays are
-// authored on the image and may spill in the area kept for the borders
+// authored on the image and may spill in the area kept for the borders. With 'Transparent parts shine
+// through' the leftover area is left untouched, whatever the window shows there stays visible
 void B2SRenderer::RenderAspectPadding(VPXRenderContext2D* ctx)
 {
+   if (shineThroughProp_Get())
+      return;
    const float left = m_layoutOX;
    const float top = m_layoutOY;
    const float bottom = m_padH - m_layoutOY - m_contentH;
@@ -2110,8 +2129,9 @@ bool B2SRenderer::RenderBackglass(VPXRenderContext2D* ctx, B2SServer* server)
    UpdateAnimations(m_b2s->m_backglassAnimations, elapsed, server, dualMode);
 
    // B2S Pro: transparent canvas pixels composite over the authored backing color instead of black (reference fB:617-627).
-   // The color is stored in a 1x1 texture so it is drawn untinted, exactly as authored
-   if (m_b2s->m_canvasBacking.has_value())
+   // The color is stored in a 1x1 texture so it is drawn untinted, exactly as authored. With 'Transparent parts shine
+   // through' this underlay is left out, so the transparent pixels of the artwork show what is underneath the view
+   if (m_b2s->m_canvasBacking.has_value() && !shineThroughProp_Get())
    {
       if (m_canvasBackingTex == nullptr)
       {
