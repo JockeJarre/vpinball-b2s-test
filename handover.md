@@ -1,6 +1,6 @@
 # B2S Pro — KeepAspectRatio handover
 
-Date: 2026-11-09 · Branch `b2s-pro`, code tip `f1ea3dd5f` (this document and its updates on top)
+Date: 2026-11-09 · Branch `b2s-pro`, code tip `ffe11e1cf` (this document and its updates on top)
 · Repo `JockeJarre/vpinball-b2s-test`
 
 ---
@@ -25,6 +25,7 @@ Date: 2026-11-09 · Branch `b2s-pro`, code tip `f1ea3dd5f` (this document and it
 | `1a1baa010` | 19:33 | **`Strict file name match`** setting: loose backglass file matching, table name matched up to its first `)` (§4) |
 | `cae1a15e6` | 11:54 | **Fix**: DMD overlays at the wrong height with `Keep aspect ratio` on (§2, stage 8) |
 | `f1ea3dd5f` | 12:19 | **`Keep aspect ratio`** becomes a percentage 0..100 (§2, stage 9) |
+| `ffe11e1cf` | 17:48 | **`Transparent parts shine through`** setting (§11) |
 
 `git diff --stat 9a111ce35^..HEAD` — 19 files, +275 / −94.
 
@@ -298,15 +299,15 @@ with zipfile.ZipFile("b2s-pro-windows-x64-<sha>.zip", "w", zipfile.ZIP_DEFLATED)
 EOF
 ```
 
-Artifacts dropped on the share (x64, commit `f1ea3dd5f`, **zip only** — no unpacked folder):
+Artifacts dropped on the share (x64, commit `ffe11e1cf`, **zip only** — no unpacked folder):
 
 ```
-/mnt/pinball/B2Spro/b2s-pro-windows-x64-f1ea3dd5f.zip   9.08 MB
+/mnt/pinball/B2Spro/b2s-pro-windows-x64-ffe11e1cf.zip   9.08 MB  md5 c8e86e0fb32af63a24fa81d6694b7db1
     plugin-b2spro64.dll   plugin.cfg
     libgcc_s_seh-1.dll    libstdc++-6.dll    libwinpthread-1.dll
 ```
 
-Install as `plugins/b2s-pro/`. The `cae1a15e6` artifacts are gone from the share.
+Install as `plugins/b2s-pro/`. The `f1ea3dd5f` zip is removed from the share.
 
 ---
 
@@ -343,14 +344,14 @@ Verdict: near-identical siblings from the same `Update for B2S pro` base.
 ## 9. Settings page (`cae1a15e6`)
 
 Once a backglass file is loaded the plugin replaces its implicit settings page with a sectioned
-**Backglass Settings** sheet — 11 items under 2 headers — and registers the **`Edit "<file>"`** sheet
+**Backglass Settings** sheet — 12 items under 2 headers — and registers the **`Edit "<file>"`** sheet
 (the DMD overlay editor: position, size, style, dots, tint, glass, bounds detection, save) below it.
 All items are `PAGEDUI_STORAGE_HOST`, keyed by the plugin id `B2SPro`, so they persist in the host
 across tables. Today:
 
 | Header | Items |
 |---|---|
-| Backglass Settings | Show Grill (bool) · Dual Mode (enum) · Upgraded segment rendering (bool) · **Keep aspect ratio (%)** (int slider 0..100, default 100) · **Center vertically** (bool) · Used LED type (enum) · **Strict file name match** (bool) |
+| Backglass Settings | Show Grill (bool) · Dual Mode (enum) · Upgraded segment rendering (bool) · **Keep aspect ratio (%)** (int slider 0..100, default 100) · **Center vertically** (bool) · **Transparent parts shine through** (bool) · Used LED type (enum) · **Strict file name match** (bool) |
 | Modify Backglass | Global animation slowdown · Per-animation slowdowns · (the `Edit "…"` sheet is appended by the host) |
 
 Changelog entries for the renderer work: `docs/Changelog.txt` (the KeepAspectRatio entries in FEATURES
@@ -377,3 +378,49 @@ and the DMD quad placement fix in FIXES).
    `.B2SPro` sibling (`4d51d1684`) was implemented, reviewed and **dropped** — saves stay in the
    loaded file (§3).
 9. `resources/` is untracked; add `.gitattributes` and commit if the samples should live in the repo.
+10. **Test the shine-through flag** (`ffe11e1cf`, §11) on a backglass with transparent pixels (a die-cut
+    canvas): with the flag on, the authored backing color under the artwork and the black leftover area
+    must be gone. On a dedicated backglass window those areas stay black — the host opaque clear, §11.
+11. **Decide the host side of the shine-through** (§11): a transparent ancillary-window clear is a host
+    change, outside the plugin-only scope of this branch.
+
+---
+
+## 11. Transparent parts shine through (`ffe11e1cf`)
+
+Backglass images carry transparent pixels (die-cut canvases, a DMD background not covering its view, a
+`.B2SPro` canvas with holes). The plugin was making those pixels opaque **itself**, in two places:
+
+- the authored **canvas backing color** (`CanvasBacking`, the B2S Pro feature compositing transparent canvas
+  pixels over an authored color, reference fB:617-627) is a 1×1 texture drawn over the **whole padded
+  surface**, under everything
+- the **`Keep aspect ratio` leftover area** is painted with the 1×1 opaque black texture (§2 stage 6)
+
+The images themselves are drawn with their own alpha and the host alpha-blends them, so nothing more is
+needed on the plugin side. The new **`Transparent parts shine through`** setting (default off: the view
+stays fully opaque as before) leaves both out — no backing color under the artwork, no black in the
+leftover area — so the plugin contributes nothing where its images are transparent.
+
+**Where the limit is.** What is *underneath* is the host's decision, and the host clears an ancillary
+window/region **opaque**:
+
+- embedded backglass: `Renderer::ClearEmbeddedAncillaryWindow` → `DrawEmbeddedQuad(..., 0, 0, 0)` draws the
+  region clear with `vColor_Intensity(r, g, b, **1.f**)` (`src/renderer/Renderer.cpp:1920`) — opaque black
+  over the playfield scene that is already in that target
+- a dedicated backglass window: the render pass takes the window back buffer with `useRTContent = false`
+  (`Renderer.cpp:1893`), i.e. it is cleared, and VPX creates its windows without any translucency support
+  (no transparent-window flag anywhere in `src/renderer/Window.cpp`)
+
+So with the flag on, the transparent pixels show the **host clear** (black) instead of the authored backing
+color and the plugin-painted black borders. To reveal the playfield (embedded) or the desktop (dedicated
+window), the host clear has to keep alpha — the embedded one is a one-liner at that `DrawEmbeddedQuad`
+call (alpha 0, and the region clear left out when the plugin asks for it), the dedicated window needs a
+translucent swapchain. Both are **host** changes, outside the plugin-only scope of this branch: the flag is
+the plugin-side half, ready for it.
+
+If the host side is picked up, the plugin does not have to invent a channel: the setting is
+`PAGEDUI_STORAGE_HOST`, so its value is stored by the host itself (`src/core/VPXPluginPagedUI.cpp`,
+`src/ui/live/ingameui/PluginSettingsPage.cpp`) under the plugin id `B2SPro` — the host clear can read the
+same value. `VPXRenderContext2D::rendererData` is **not** such a channel: the host fills it with its own
+`AncillaryRenderSetup` (`Renderer.cpp:1591`), it is not plugin-provided.
+
