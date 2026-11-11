@@ -282,9 +282,16 @@ the B2S Pro release goes next to it, loose matching has to be turned off for it)
   was exhausted. The repository was made **public** (public jobs are not metered, fair use only), and
   `42971169764` then built the plugin job in ~1 min with a real MSVC compile. Keep the job count to the
   minimum (one configuration each), which is why the matrices are single entries.
-* **Test builds to use**: the app artifact (BGFX Windows x64, §12) and the plugin zip
-  (`b2s-pro-windows-x64-msvc-<sha>.zip`, 638 KB, MSVC static runtime, no DLLs). The local mingw zips are
-  the 9 MB ones with the runtime DLLs (§6) — equivalent for testing, and the 32-bit build is local only.
+* **Both workflows are green on `b6a3a3af9`**: plugin job `43069250944` (~1 min) and application job
+  `43069250946` (~25 min, the external dependency cache of `42971169803` hit). The application job is the
+  **only MSVC compile of the host sources** available (no local app build: the linux `third-party/build-libs`
+  are empty, `external.sh` needs system dev packages, §6), so a host syntax error shows up there, not locally.
+* **Test builds on the share** (`\\vpinball\B2Spro`):
+  `VPinballX_BGFX-10.8.1-6689-b6a3a3af9-windows-x64-Release.zip` (202 MB, the runnable folder: `VPinballX_BGFX64.exe`,
+  PDBs, DLLs, `assets`, `scripts`, `docs`, `plugins/` — **including `plugins/b2s-pro/plugin-b2spro64.dll`**, verified
+  in the artifact, so it is the complete §12 test build), and `b2s-pro-windows-x64-msvc-b6a3a3af9.zip` (655 KB,
+  `b2s-pro/plugin-b2spro64.dll` + `plugin.cfg`, for an official shipped app). The local mingw zips (9 MB, with the
+  runtime DLLs) are equivalent for testing; the 32-bit build is local only (§6).
 
 ---
 
