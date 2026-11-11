@@ -268,17 +268,23 @@ the B2S Pro release goes next to it, loose matching has to be turned off for it)
   `prerelease.yml`, `vpx-test.yml`) are **not on this branch**: `41e85cc22` removed them. These two
   files are the trimmed replacement for the one configuration tested. The 32-bit and the mingw
   plugin builds are made locally with `tools/build_b2s_plugin_windows.sh` (§6).
-  In the application artifact the in-tree B2S (`src/core/player.cpp:160`, id `B2S`) and the standalone
-  `plugins/b2s-pro/plugin-b2spro64.dll` (id `B2SPro`) are **both** built from the same sources, so
-  both draw the backglass: drop `plugins/b2s-pro` from the artifact, or set the extra renderer
-  priority to `-1` (§12).
-* **Current CI blocker (infrastructure, not code)**: runs `42504150668` and its re-run end with
-  `conclusion: failure`, `steps: []`, `runner_name: ""` after ~6 s. GitHub refuses to provision a
-  `windows-latest` runner — Actions spending limit / billing quota
-  (<https://github.com/settings/bits>). The code compiles cleanly locally; the plugin builds are made
-  with the local mingw cross toolchain (§6), the application is not. Options: raise the spending
-  limit / add a payment method, and keep the job count to the minimum, which is why the matrix is a
-  single entry.
+  On this branch the `plugins/b2s` sources **are** the B2S Pro ones, and the app builds them as
+  `plugins/b2s-pro/` (plugin.cfg id `B2SPro`, renderer id `B2SPro`, `plugin-b2spro64.dll`): the app
+  artifact is a **complete** test build of §12 (host support + plugin), with no stock `B2S` plugin in
+  it — the app loads plugins dynamically, the statically linked table of `src/core/player.cpp:160` is
+  the `__EMSCRIPTEN__` web build only. The plugin zip of `b2s-plugin.yml` targets the **official**
+  shipped app (stock `B2S` renderer): there the stock plugin must be disabled (`[Plugin.B2S]
+  Enable = 0`), and with both enabled and layering on both draw the backglass, one over the other
+  (priority `-1` on the stock one).
+* **CI status, and the runner quota**: runs `42504150668`, `42964578836`, `42964799055`, `42964832809`
+  all ended with `conclusion: failure`, `steps: []`, `runner_name: ""` after ~6 s: **no Windows runner was
+  provisioned**, the private repository Windows minutes quota (110/month, **metered ×2** for private repos)
+  was exhausted. The repository was made **public** (public jobs are not metered, fair use only), and
+  `42971169764` then built the plugin job in ~1 min with a real MSVC compile. Keep the job count to the
+  minimum (one configuration each), which is why the matrices are single entries.
+* **Test builds to use**: the app artifact (BGFX Windows x64, §12) and the plugin zip
+  (`b2s-pro-windows-x64-msvc-<sha>.zip`, 638 KB, MSVC static runtime, no DLLs). The local mingw zips are
+  the 9 MB ones with the runtime DLLs (§6) — equivalent for testing, and the 32-bit build is local only.
 
 ---
 
@@ -381,6 +387,9 @@ across tables. Today:
 Changelog entries for the renderer work: `docs/Changelog.txt` (the KeepAspectRatio entries in FEATURES
 and the DMD quad placement fix in FIXES).
 
+The master switch of the whole transparency/layering feature is not on this page: it is a host setting, on the
+**Display** page (§12.1).
+
 ---
 
 ## 10. Open items
@@ -415,8 +424,16 @@ and the DMD quad placement fix in FIXES).
     display page, `Transparent parts shine through` on — the PinUp content must show through the backglass'
     transparent areas. With the setting off, PinUp must not be drawn at all (the legacy path, check the frame
     time of a PUP-only setup is unchanged).
-13. **Test builds**: in a build where the stock B2S plugin and B2S Pro are both enabled, set the stock B2S
-    priority to `-1` — with composited renderers both would draw the backglass, one over the other (§12).
+13. **Test builds**: the application artifact of this branch carries the host support **and** the B2S Pro plugin (§5),
+    which is the build to test items 12 and 14 with. In a build where the stock B2S plugin and B2S Pro are both enabled
+    (official app + the plugin zip), set the stock B2S priority to `-1` — with composited renderers both would draw the
+    backglass, one over the other (§12).
+14. **Test the layering master switch** (§12.1): off, a `Transparent parts shine through` backglass must stay fully
+    opaque (no black holes, nothing drawn below) and the frame time of a PUP-only setup must be unchanged; on, item
+    12 applies. Check the value survives a restart and that turning it on mid session needs no table reload.
+15. **Open for the promotion**: the master switch is a `Global` (app level) setting. A per-table control would need
+    a `Dyn` (contextual) property, which changes the ini key handling; nothing in the renderer layer depends on the
+    section it lives in.
 
 ---
 
@@ -458,6 +475,9 @@ If the host side is picked up, the plugin does not have to invent a channel: the
 same value. `VPXRenderContext2D::rendererData` is **not** such a channel: the host fills it with its own
 `AncillaryRenderSetup` (`Renderer.cpp:1591`), it is not plugin-provided.
 
+**Update**: the host side was picked up for the renderer stacking case (§12), and the master switch of §12.1 gates
+this flag: `ShineThrough()`, which the drawing tests, is the plugin setting **and** the host switch.
+
 
 ---
 
@@ -477,7 +497,7 @@ shine *through* it.
   first renderer which claimed the window**. So a lower-priority PinUp player was not dimmed, not covered —
   it was simply never drawn, whatever its priority was.
 
-**What the host does now** (3 files):
+**What the host does now**:
 
 | File | Change |
 |---|---|
@@ -519,13 +539,44 @@ ones below it left, so the ones below show through the untouched areas of the on
 | B2S Pro 60 / PUP 40, PUP has nothing to show | B2S Pro alone |
 | B2S Pro 60 (layered) / PUP 40 / Nixie 20 | Nixie, PUP, B2S Pro: PUP covers Nixie (higher priority), B2S Pro reveals both where transparent |
 
-**Renderer id, in the coexistence build**: the priority key is the renderer id, and the standalone build declares
-`B2SPro` while the stock plugin declares `B2S` — independent settings. Both enabled at priority ≥ 0 with a
-composited window draws the backglass **twice**, one over the other: set the stock B2S priority to `-1` in test
-builds (it is erased from the list). When B2S Pro replaces B2S there is a single `B2S` renderer (the built-in
-plugin table, `src/core/player.cpp:160`), so this is moot.
+**Renderer id, and the two plugin flavours**: the priority key is the renderer id. This branch declares `B2SPro`
+everywhere (plugin.cfg id, exports, renderer id), including in its application build, so that artifact has a single
+B2S family renderer and nothing is drawn twice. The case to keep in mind is the **official** app (renderer id `B2S`)
+plus this plugin (`B2SPro`) at priority ≥ 0 with a composited window: both draw the backglass, one over the other —
+set the stock B2S priority to `-1` (it is erased from the list). Once B2S Pro replaces B2S there is a single `B2S`
+renderer, so this is moot.
 
 **Checked**: the walk was exercised as a standalone stub (`/tmp/host_layer_test.cpp`, 10 cases, all passing):
 nobody declares layering with two renderers → exactly today's draws; single legacy renderer; nobody claims;
 layered top over opaque PUP; layered top which does not claim; layered with an opaque claimer in between; all
 layered; single layered renderer; nobody claims with one layered. The plugin builds natively and with mingw.
+
+### 12.1 Master switch (`Global / AncillaryLayering`, default off)
+
+The feature above is global cost (a whole renderer drawn and covered) and global semantics (pixels of one plugin
+appearing in the window of another). One host switch turns it off for every plugin at once, and it is off by
+default: an app started with default settings behaves **exactly** as the shipped one, and one where it is never
+turned on pays nothing for the feature.
+
+| Piece | Where |
+|---|---|
+| Setting `Global / AncillaryLayering`, bool, default **false** | `src/core/Settings_properties.inl` (the app level section, next to `EnableLog`, …) |
+| In game UI: Display page, header *Plugin rendering*, item *Transparent Plugin Rendering* | `src/ui/live/ingameui/DisplaySettingsPage.cpp`, `DisplayHomePage::BuildPage`, under the Backglass / ScoreView / Topper rows |
+| Live values | `Player::m_ancillaryLayering`, `Renderer::m_ancillaryLayering`. **No settings lookup in the render loop**: both cached. The player seeds its copy once at construction and `Player::SetAncillaryLayering` is the only writer (the in game UI persists the setting, an external ini edit needs a restart); the renderer is seeded in `UpdateSettings` (table load) and pushed by the player |
+| Gate | `Renderer::RenderAncillaryWindow`: `composited = m_ancillaryLayering && any renderer declares isLayeredOverlay`. Off, the winner-takes-all loop runs, byte for byte the shipped behaviour |
+| Pushed to the plugins | `GetAncillaryRendererMsg` gains `int layeringEnabled`, written at each collection with the sentinels `VPXPI_ANCILLARY_LAYERING_ENABLED` / `VPXPI_ANCILLARY_LAYERING_DISABLED` |
+| Plugin side | `B2SRenderer::SetHostLayeringEnabled`; `ShineThrough()` = host master switch **and** our own setting, and it is what the **drawing** tests (canvas backing, padding), so the plugin never leaves areas open when nothing is composited below it |
+
+Why the state is pushed to the plugins rather than only checked by the host: with compositing off, the areas a
+transparent renderer leaves untouched show the **window clear** (black), not the renderers below, so a renderer has
+to know and draw its whole window opaquely. The compatibility both ways is by construction: a plugin which does not
+know the field reads a plain `0` (the message is zero initialized), which is not the *enabled* sentinel, and a host
+which does not know the field never writes it, so an 8-field plugin reads stack garbage — in both cases "not
+enabled", which is what an old opaque-only plugin does anyway.
+
+**Cost when off**: per window and per frame, the walk of the (tiny, already existing) priority list plus a member
+bool read. No settings lookup, no message, no allocation, no extra render state. The UI is one row on an existing
+page.
+
+**Live**: `Player::SetAncillaryLayering` updates the renderer value and re-collects the renderers, which pushes the
+state to the plugins and makes them re-declare. No table reload, no restart.

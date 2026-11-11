@@ -27,10 +27,15 @@ namespace B2S
 
 class B2SServer;
 
-// Whether the renderer leaves the areas it does not draw untouched, following the 'Transparent parts shine
-// through' setting: the server declares it through AncillaryRendererDef::isLayeredOverlay when the host
-// collects the renderers of a window, so that the host composites the less prioritized renderers below us
+// Whether the renderer leaves the areas it does not draw untouched: our 'Transparent parts shine through'
+// setting, and only while the host allows layered rendering (SetHostLayeringEnabled). The server declares it
+// through AncillaryRendererDef::isLayeredOverlay when the host collects the renderers of a window, so that the
+// host composites the less prioritized renderers below us, and the drawing itself follows it
 bool ShineThrough();
+
+// State of the layering master switch of the host, pushed at every renderer collection (see
+// GetAncillaryRendererMsg::layeringEnabled): off, the host does not composite the window and we must draw opaque
+void SetHostLayeringEnabled(bool enabled);
 
 class B2SRenderer final
 {

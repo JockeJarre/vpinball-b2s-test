@@ -54,9 +54,18 @@ static MsgSettingDef shineThroughProp { .propId = "ShineThrough", .name = "Trans
       "off the view stays fully opaque: the authored backing color under the artwork, the leftover area black",
    .isUserEditable = 1, .type = MSGPI_SETTING_TYPE_BOOL, .boolDef = { 0, &shineThroughProp_Get, &shineThroughProp_Set } };
 
-// Whether our own drawing leaves untouched areas (the 'Transparent parts shine through' setting). Read by the
-// server when the host collects our window renderers, to set AncillaryRendererDef::isLayeredOverlay
-bool ShineThrough() { return shineThroughProp_Get() != 0; }
+// The host has a master switch for the layered rendering of the renderers of a window: it pushes its state to us
+// at every renderer collection (GetAncillaryRendererMsg::layeringEnabled). It reads as off when the host does not
+// know that field at all. Layering off means nothing is ever composited below us, so the areas we would leave
+// untouched would show the window clear: transparency is then off as a whole, our own setting notwithstanding
+static int s_hostLayeringEnabled = 0;
+
+void SetHostLayeringEnabled(const bool enabled) { s_hostLayeringEnabled = enabled ? 1 : 0; }
+
+// Whether our own drawing leaves untouched areas: the 'Transparent parts shine through' setting, and only while
+// the host allows layered rendering. Read by the server when the host collects our window renderers (to set
+// AncillaryRendererDef::isLayeredOverlay), and by the drawing itself
+bool ShineThrough() { return s_hostLayeringEnabled != 0 && shineThroughProp_Get() != 0; }
 
 static const char* dualModeValues[] = { "Authentic", "Fantasy" };
 MSGPI_ENUM_VAL_SETTING(dualModeProp, "DualMode", "Dual Mode", "Active mode for dual backglasses (authentic or fantasy)", true, 1, 2, dualModeValues, 1);
@@ -328,7 +337,7 @@ void B2SRenderer::FitSurfaceToWindow(VPXRenderContext2D* ctx, const float conten
 // through' the leftover area is left untouched, whatever the window shows there stays visible
 void B2SRenderer::RenderAspectPadding(VPXRenderContext2D* ctx)
 {
-   if (shineThroughProp_Get())
+   if (ShineThrough())
       return;
    const float left = m_layoutOX;
    const float top = m_layoutOY;
@@ -2158,7 +2167,7 @@ bool B2SRenderer::RenderBackglass(VPXRenderContext2D* ctx, B2SServer* server)
    // B2S Pro: transparent canvas pixels composite over the authored backing color instead of black (reference fB:617-627).
    // The color is stored in a 1x1 texture so it is drawn untinted, exactly as authored. With 'Transparent parts shine
    // through' this underlay is left out, so the transparent pixels of the artwork show what is underneath the view
-   if (m_b2s->m_canvasBacking.has_value() && !shineThroughProp_Get())
+   if (m_b2s->m_canvasBacking.has_value() && !ShineThrough())
    {
       if (m_canvasBackingTex == nullptr)
       {

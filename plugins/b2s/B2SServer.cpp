@@ -721,6 +721,10 @@ void B2SServer::OnGetRenderer(const unsigned int, void* userData, void* msgData)
    {
       if (msg->count < msg->maxEntryCount)
       {
+         // The host tells us the state of its layering master switch, our drawing follows it (see ShineThrough):
+         // when layering is off nothing is composited below us, so we draw the whole window opaquely
+         SetHostLayeringEnabled(msg->layeringEnabled == VPXPI_ANCILLARY_LAYERING_ENABLED);
+
          // The layered rendering capability follows the 'Transparent parts shine through' setting: opaque, we
          // cover the window and the host spares drawing the less prioritized renderers below us; transparent, we
          // leave untouched areas for them to shine through. The setting setter announces a renderer list

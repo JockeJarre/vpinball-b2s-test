@@ -5,11 +5,19 @@
 # b2s-plugin.yml (plugin only, no application).
 #
 # What lands in the artifact: VPinballX_BGFX64.exe + its PDB, the shared libraries, assets, scripts,
-# docs and the plugins folder. Note that this branch builds the B2S plugin of the tree as a
-# standalone plugin too (plugins/b2s-pro/plugin-b2spro64.dll, plugin id B2SPro), while the
-# application also registers the in-tree B2S (src/core/player.cpp:160, id B2S) from the very same
-# sources. Both are then active at once, drawing the backglass twice: delete plugins/b2s-pro from
-# the artifact for an application only test, or set the extra renderer's priority to -1.
+# docs and the plugins folder. On this branch the plugins/b2s sources ARE the B2S Pro ones, built as
+# plugins/b2s-pro/ (plugin.cfg id 'B2SPro', renderer id 'B2SPro', plugin-b2spro64.dll), and that is
+# the only B2S family plugin of the build: the app loads it dynamically, and the statically linked
+# plugin table (src/core/player.cpp:160) is the __EMSCRIPTEN__ web build only. The artifact is
+# therefore a complete test build of composited renderers: turn the master switch on (in game
+# Display page, 'Transparent Plugin Rendering'), set 'Transparent parts shine through' on the
+# Backglass settings page, and give a second renderer (PinUp Player) a lower Backglass priority.
+#
+# The plugin zip of b2s-plugin.yml targets the official shipped application, which has the stock
+# B2S plugin: there, disable the stock one ([Plugin.B2S] Enable = 0, as the B2S Pro plugin warns),
+# both replace the B2S.Server COM object. With both enabled and layering on, the two renderers claim
+# the Backglass under their own ids ('B2S', 'B2SPro', independent priority settings) and both draw
+# the backglass, one over the other: set the stock one to priority -1.
 name: vpinball-windows-bgfx
 on:
   push:

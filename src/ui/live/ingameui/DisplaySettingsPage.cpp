@@ -60,6 +60,21 @@ void DisplayHomePage::BuildPage()
 
    m_player->m_liveUI->m_inGameUI.AddPage("settings/display_topper"s, []() { return std::make_unique<DisplaySettingsPage>(VPXWindowId::VPXWINDOW_Topper); });
    AddItem(std::make_unique<InGameUIItem>("Topper Display"s, ""s, "settings/display_topper"s));
+
+   // Master switch of the ancillary window renderer layering: the renderers which can draw with transparency (see
+   // AncillaryRendererDef::isLayeredOverlay) only do so when this is on, and the windows are then composited from
+   // the least to the most prioritized renderer of each window, so the ones below shine through the untouched
+   // areas of the ones above. Off, only the most prioritized renderer claiming a window is drawn, opaquely
+   AddItem(std::make_unique<InGameUIItem>(InGameUIItem::LabelType::Header, "Plugin rendering"s));
+   AddItem(std::make_unique<InGameUIItem>(
+              Settings::m_propGlobal_AncillaryLayering, //
+              [this]() { return m_player->GetAncillaryLayering(); }, // Live
+              [this](const bool v)
+              {
+                 m_player->SetAncillaryLayering(v);
+                 RequestRebuild();
+              }))
+      .m_excludeFromDefault = true;
 }
 
 

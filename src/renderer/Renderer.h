@@ -233,6 +233,10 @@ public:
    bool UseAnisoFiltering() const;
    void SetAnisoFiltering(bool enable);
 
+   // Master switch of the ancillary window renderer layering, applied live (pushed by Player::SetAncillaryLayering,
+   // seeded by UpdateSettings): see RenderAncillaryWindow and AncillaryRendererDef::isLayeredOverlay
+   void SetAncillaryLayering(const bool enabled) { m_ancillaryLayering = enabled; }
+
    std::shared_ptr<Sampler> GetBallEnvironment() const { return m_ballEnvSampler; }
 
    class SceneLighting
@@ -455,6 +459,8 @@ private:
 
    bool m_dynamicAO;
    bool m_disableAO;
+   // Live value of the ancillary window renderer layering master switch (see SetAncillaryLayering)
+   bool m_ancillaryLayering { false };
    std::shared_ptr<Sampler> m_aoDitherSampler = nullptr;
 
    std::shared_ptr<Sampler> m_envSampler = nullptr;
