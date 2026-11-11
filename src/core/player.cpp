@@ -122,10 +122,6 @@ Player::Player(PinTable *const table, const PlayMode playMode, LoadProgress &loa
    g_pplayer = this;
    g_settingsService.SetTableOverride(&m_ptable->GetSettings());
 
-   // Seed the live value of the ancillary window renderer layering master switch: it is a 'Global' setting,
-   // read once here (the in game UI applies it live through SetAncillaryLayering and persists it), so neither
-   // the render loop nor the renderer collection ever reads settings for it
-   m_ancillaryLayering = g_settingsService.GetActiveSettings().GetPlayer_AncillaryLayering();
    m_ptable->AddRef();
 
    constexpr float progressStartupLength = 5.f;
@@ -2793,10 +2789,6 @@ void Player::OnAuxRendererChanged(const unsigned int msgId, void* userData, void
       // plugins have: they cover the whole window) and not as whatever the allocation happened to hold
       me->m_ancillaryWndRenderers[window].assign(getAuxRendererMsg.count, AncillaryRendererDef {});
       getAuxRendererMsg = { window, getAuxRendererMsg.count, 0, me->m_ancillaryWndRenderers[window].data() };
-      // A renderer which leaves the areas it does not cover untouched must also stop doing so when the host does
-      // not composite the window (those areas would show the window clear), so the renderers are told the state of
-      // the master switch (see GetAncillaryRendererMsg::layeringEnabled)
-      getAuxRendererMsg.layeringEnabled = me->m_ancillaryLayering ? VPXPI_ANCILLARY_LAYERING_ENABLED : VPXPI_ANCILLARY_LAYERING_DISABLED;
       m_msgApi->BroadcastMsg(me->m_pluginAPI.GetVPXEndPointId(), me->m_getAuxRendererId, &getAuxRendererMsg);
       auto& priorities = me->m_ancillaryWndRendererPriorities[window];
       for (const auto& renderer : me->m_ancillaryWndRenderers[window])
@@ -2827,17 +2819,6 @@ void Player::SetAncillaryRendererPriority(VPXWindowId window, const string& id, 
    m_ancillaryWndRendererPriorities[window][id] = priority;
    // Re-collect and re-sort so the change is directly applied (also restores renderers
    // previously dropped for a negative priority)
-   OnAuxRendererChanged(0, this, nullptr);
-}
-
-void Player::SetAncillaryLayering(const bool enabled)
-{
-   m_ancillaryLayering = enabled;
-   if (m_renderer != nullptr)
-      m_renderer->SetAncillaryLayering(enabled);
-   // The renderers must know it: one which draws with alpha has to draw opaque again when the window is not
-   // composited, and it is the renderers which declare the capability, so the renderer list is re-collected
-   // (which also pushes the new state through GetAncillaryRendererMsg)
    OnAuxRendererChanged(0, this, nullptr);
 }
 

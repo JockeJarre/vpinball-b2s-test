@@ -570,7 +570,7 @@ turned on pays nothing for the feature.
 |---|---|
 | Setting `Player / AncillaryLayering`, `PropBoolDyn` (contextual), default **false** | `src/core/Settings_properties.inl`. Contextual, like the display settings: saved **globally** or as a **table override**, ini key `Player / AncillaryLayering` |
 | In game UI: **Display → Backglass display** page, header *Plugin rendering*, item *Transparent Plugin Rendering* | `src/ui/live/ingameui/DisplaySettingsPage.cpp`, end of `DisplaySettingsPage::BuildWindowPage`, gated on `m_wndId == VPXWindowId::VPXWINDOW_Backglass`. That page is `SaveMode::Both`, so the item gets the page's *save globally / save as table override* buttons |
-| Live values | `Player::m_ancillaryLayering`, `Renderer::m_ancillaryLayering`. **No settings lookup in the render loop**: both cached. The player seeds its copy from the active settings at construction, the renderer in `UpdateSettings` (table load), and `Player::SetAncillaryLayering` is the only writer. The UI item both applies live and writes the value through `GetActiveTableOverrideOrCurrentSettings().SetPlayer_AncillaryLayering(v, false)`, the pattern of the other items of the page: the toggle takes effect immediately, the page's Save then stores it globally (resetting the override) or as a table override. An external ini edit is picked up at the next table load |
+| Live values | `Player::m_ancillaryLayering`, `Renderer::m_ancillaryLayering`. **No settings lookup in the render loop**: both cached. The player seeds its copy from the active settings at construction, the renderer in `UpdateSettings` (table load), and `Player::SetAncillaryLayering` is the only writer. The UI item follows the pattern of every item of that page: its *live* value is `Player::GetAncillaryLayering()`, its setter only applies the change live, and the page's **Save** (SaveMode::Both) stores it, globally (resetting the overrides) or as a table override, through the generic `Settings::Set(propId, v, isTableOverride)` API. The modified state is the live value against the stored one, so the save button shows up as soon as you toggle it. An external ini edit is picked up at the next table load |
 | Gate | `Renderer::RenderAncillaryWindow`: `composited = m_ancillaryLayering && any renderer declares isLayeredOverlay`. Off, the winner-takes-all loop runs, byte for byte the shipped behaviour |
 | Pushed to the plugins | `GetAncillaryRendererMsg` gains `int layeringEnabled`, written at each collection with the sentinels `VPXPI_ANCILLARY_LAYERING_ENABLED` / `VPXPI_ANCILLARY_LAYERING_DISABLED` |
 | Plugin side | `B2SRenderer::SetHostLayeringEnabled`; `ShineThrough()` = host master switch **and** our own setting, and it is what the **drawing** tests (canvas backing, padding), so the plugin never leaves areas open when nothing is composited below it |
@@ -594,3 +594,35 @@ state to the plugins and makes them re-declare. No table reload, no restart.
 draws a placeholder in place of it). A `Global`, non contextual property cannot be saved by any page save flow, so the
 toggle applied live and was lost on restart, with no way to store it, globally or per table. As a contextual property on
 the per window display page, it saves like every other display setting.
+
+### 12.2 The dot matrix behind the artwork (read from the image, no setting)
+
+A grill can be authored with a hole in it (the die cut, the window of a backbox). Drawing the DMD **over** the
+artwork then paints the dot matrix on the facade, which is the shipped behaviour. The display sits behind that
+hole, so when it *can* be seen through, the display is drawn **before** the backglass images: the openings of the
+artwork reveal it, its opaque parts (mesh, frame, screws) cover it, as in a real backbox.
+
+| Piece | Where |
+|---|---|
+| Detection | `B2SRenderer::ArtworkHasOpening(artwork, x, y, w, h)`: the authored area of the display (`<Displays><DMD X/Y/W/H>`, in artwork pixels) is sampled in the artwork. **No alpha channel in the file → no opening** (`VPXTEXFMT_sRGBA8` is the only format carrying one), fully opaque over the area → no opening. It counts the pixels whose alpha is below half and requires at least a quarter of the area transparent, so soft edges and softly matted artwork do not flip it. Cached per (texture, area) pair, sampled once |
+| When it applies | `(ctx->isLayered != 0) && ShineThrough()`: the window is **composited by the host** (the display settings master switch, §12.1) **and** our transparent parts shine through. Opaque, the artwork would hide the display, so the shipped order (display on top) is kept, at no cost |
+| The two passes | `B2SRenderer::RenderBackglass`: `RenderDisplays(..., behindArtworkPass=true, ...)` before the off/on images, `RenderDisplays(..., behindArtworkPass=false, ...)` after them. `RenderDisplays` classifies each display and skips the ones of the other pass, so each display is drawn in exactly one of the two |
+| ABI | `VPXRenderContext2D` gains `int isLayered` (appended at the end), written by the host at **both** ancillary call sites: 1 in the composited loop, 0 in the winner-takes-all one. Zero is also what a host without the field gives, and an embedded (3D) render is never composited |
+
+The state is available exactly where it is used: the host knows at the render call whether the window is composited,
+so the plugin stores nothing, and the rule of §12.1 (a renderer leaving areas open must know when nothing is
+composited below it) is carried by the same field. An opening is looked for in the image, not in a setting: a table
+whose artwork covers the display area is a table where it cannot be applied, and there is nothing to choose there.
+
+**ABI compatibility** is by construction, in both directions: the fields are **appended** at the end of their
+struct, and every one of them reads as "the feature is off" for a counterpart which does not know it.
+
+| Situation | Result |
+|---|---|
+| New host, **old plugin** | The plugin fills the renderer def with a 6 field aggregate initializer: the host reads its `isLayeredOverlay` as 0, so the window is not composited, and the plugin never sees `layeringEnabled` / `isLayered` written |
+| **Old host**, new plugin | `entries` has the old stride, so the plugin never reaches `isLayeredOverlay` (reads 0, declares opaque); the render context leaves `isLayered` at 0 |
+| New host, new plugin | Layered rendering with the master switch |
+
+The structs are all in `plugins/plugins/VPXPlugin.h`, the file the plugin SDK is built from: the plugin side compiles
+against the same header as the host in this tree, and an out of tree plugin built from an older SDK keeps working.
+That is also why the fields are appended and not inserted.

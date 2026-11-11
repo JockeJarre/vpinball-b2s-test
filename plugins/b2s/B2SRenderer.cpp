@@ -54,18 +54,13 @@ static MsgSettingDef shineThroughProp { .propId = "ShineThrough", .name = "Trans
       "off the view stays fully opaque: the authored backing color under the artwork, the leftover area black",
    .isUserEditable = 1, .type = MSGPI_SETTING_TYPE_BOOL, .boolDef = { 0, &shineThroughProp_Get, &shineThroughProp_Set } };
 
-// The host has a master switch for the layered rendering of the renderers of a window: it pushes its state to us
-// at every renderer collection (GetAncillaryRendererMsg::layeringEnabled). It reads as off when the host does not
-// know that field at all. Layering off means nothing is ever composited below us, so the areas we would leave
-// untouched would show the window clear: transparency is then off as a whole, our own setting notwithstanding
-static int s_hostLayeringEnabled = 0;
-
-void SetHostLayeringEnabled(const bool enabled) { s_hostLayeringEnabled = enabled ? 1 : 0; }
-
-// Whether our own drawing leaves untouched areas: the 'Transparent parts shine through' setting, and only while
-// the host allows layered rendering. Read by the server when the host collects our window renderers (to set
-// AncillaryRendererDef::isLayeredOverlay), and by the drawing itself
-bool ShineThrough() { return s_hostLayeringEnabled != 0 && shineThroughProp_Get() != 0; }
+// Whether our own drawing leaves the areas it does not cover untouched: the 'Transparent parts shine through'
+// setting. It is read by the server when the host collects our window renderers (for
+// AncillaryRendererDef::isLayeredOverlay, which is what makes the host composite the window) and by the drawing
+// itself, so what we declare and what we draw are always the same thing: declaring without drawing transparently
+// (or the opposite) would either show the window clear where we leave areas open, or cover renderers we promised
+// to let shine through
+bool ShineThrough() { return shineThroughProp_Get() != 0; }
 
 static const char* dualModeValues[] = { "Authentic", "Fantasy" };
 MSGPI_ENUM_VAL_SETTING(dualModeProp, "DualMode", "Dual Mode", "Active mode for dual backglasses (authentic or fantasy)", true, 1, 2, dualModeValues, 1);
@@ -2183,6 +2178,21 @@ bool B2SRenderer::RenderBackglass(VPXRenderContext2D* ctx, B2SServer* server)
    // transparent openings are the only places where they show (reference fB:643-650)
    RenderBulbs(ctx, server, m_b2s->m_backglassIlluminations, elapsed, dualMode, true);
 
+   // The backglass artwork texture, needed by the DMD overlays for the 'Detect position' action of the editing page
+   const VPXTexture backImage = m_b2s->m_backglassImage.m_image ? m_b2s->m_backglassImage.m_image
+      : m_b2s->m_backglassOffImage.m_image                      ? m_b2s->m_backglassOffImage.m_image
+                                                                : m_b2s->m_backglassOnImage.m_image;
+
+   // A display whose area of the artwork is transparent (the die cut of a grill, the window of a backbox) belongs
+   // *behind* the artwork: drawn before it, the openings of the artwork reveal the dot matrix and its opaque parts
+   // (mesh, frame, screws) cover it, which is how a real backbox shows a display behind its grill. The artwork tells
+   // us (see ArtworkHasOpening), there is nothing to set. It applies where it can be seen through, i.e. when the
+   // window is composited (the host display settings switch, ctx->isLayered) and our transparent parts shine
+   // through: opaque, the artwork would simply hide the display, so the shipped order (the display on top) is kept
+   const bool dmdBehindArtwork = (ctx->isLayered != 0) && ShineThrough();
+   if (dmdBehindArtwork)
+      RenderDisplays(ctx, server, 0, backImage, true, true);
+
    // Draw background
    B2SImage& onImage = m_b2s->m_backglassOnImage;
    {
@@ -2234,10 +2244,7 @@ bool B2SRenderer::RenderBackglass(VPXRenderContext2D* ctx, B2SServer* server)
    else
       RenderBulbs(ctx, server, m_b2s->m_backglassIlluminations, elapsed, dualMode, false);
    RenderScores(ctx, server, m_b2s->m_backglassScores, elapsed);
-   const VPXTexture backImage = m_b2s->m_backglassImage.m_image ? m_b2s->m_backglassImage.m_image
-      : m_b2s->m_backglassOffImage.m_image                      ? m_b2s->m_backglassOffImage.m_image
-                                                                : m_b2s->m_backglassOnImage.m_image;
-   RenderDisplays(ctx, server, 0, backImage);
+   RenderDisplays(ctx, server, 0, backImage, false, dmdBehindArtwork); // The displays the artwork does not open over are drawn on top of it
 
    RenderAspectPadding(ctx);
 
@@ -2316,12 +2323,47 @@ bool B2SRenderer::RenderScoreView(VPXRenderContext2D* ctx, B2SServer* server)
 // demand (a display presence in the document means enabled). Each display keeps the overlay of its
 // document index whatever its target, so that the overlay state (glass texture, uploaded frame,
 // bounds search) is not shared between the backglass and score view displays
-void B2SRenderer::RenderDisplays(VPXRenderContext2D* ctx, B2SServer* server, int target, VPXTexture backImage)
+bool B2SRenderer::ArtworkHasOpening(const VPXTexture artwork, const int x, const int y, const int w, const int h)
+{
+   for (const ArtworkOpening& cache : m_artworkOpenings)
+      if (cache.texture == artwork && cache.x == x && cache.y == y && cache.w == w && cache.h == h)
+         return cache.opening;
+
+   bool opening = false;
+   const VPXTextureInfo* const info = artwork != nullptr ? GetTextureInfo(artwork) : nullptr;
+   if (info != nullptr && info->data != nullptr && info->format == VPXTEXFMT_sRGBA8) // the sole format which carries an alpha channel: an artwork without one has no transparency to open
+   {
+      const int tx = info->width > 0 ? static_cast<int>(info->width) : 0, ty = info->height > 0 ? static_cast<int>(info->height) : 0;
+      const int left = std::clamp(x, 0, tx), top = std::clamp(y, 0, ty);
+      const int right = std::clamp(x + w, left, tx), bottom = std::clamp(y + h, top, ty);
+      int transparent = 0, samples = 0;
+      for (int row = top; row < bottom; row++) {
+         const uint8_t* const line = static_cast<const uint8_t*>(info->data) + static_cast<size_t>(row) * info->width * 4;
+         for (int col = left; col < right; col++)
+            if (line[col * 4 + 3] < 128)
+               ++transparent;
+         samples += right - left;
+      }
+      // A few transparent pixels are not an opening (soft edges, a softly matted artwork): the display is behind
+      // the artwork where the artwork is essentially absent over the area of the display, a clear majority of it
+      opening = samples > 0 && transparent * 4 >= samples;
+   }
+   if (m_artworkOpenings.size() < 16)
+      m_artworkOpenings.push_back(ArtworkOpening { artwork, x, y, w, h, opening });
+   return opening;
+}
+
+void B2SRenderer::RenderDisplays(VPXRenderContext2D* ctx, B2SServer* server, int target, VPXTexture backImage, const bool behindArtworkPass, const bool allowBehindArtwork)
 {
    vector<B2SDMDDisplay>& displays = server->GetOverlayDoc().displays;
    for (size_t i = 0; i < displays.size(); i++)
    {
       if (displays[i].target != target)
+         continue;
+      // The displays are drawn in one of the two passes: the ones the artwork of the window opens over are drawn
+      // behind it, the others over it (see ArtworkHasOpening, and RenderBackglass for when it applies)
+      const bool behind = allowBehindArtwork && ArtworkHasOpening(backImage, displays[i].x, displays[i].y, displays[i].w, displays[i].h);
+      if (behind != behindArtworkPass)
          continue;
       while (i >= m_dmdOverlays.size())
          m_dmdOverlays.emplace_back(std::make_unique<DMDOverlay::Renderer>(m_vpxApi, m_resURIResolver));

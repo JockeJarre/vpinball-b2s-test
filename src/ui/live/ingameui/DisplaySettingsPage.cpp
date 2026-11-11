@@ -697,25 +697,6 @@ void DisplaySettingsPage::BuildWindowPage()
          AddItem(std::make_unique<InGameUIItem>(InGameUIItem::LabelType::Info, "You may also drag the window to adjust its position"s));
       }
    }
-
-   // Master switch of the ancillary window renderer layering: the renderers which can draw with transparency (see
-   // AncillaryRendererDef::isLayeredOverlay) only do so when this is on, and the window is then composited from the least
-   // to the most prioritized renderer of the window, so the ones below shine through the untouched areas of the ones
-   // above. Off (default), only the most prioritized renderer claiming the window is drawn, opaquely, as shipped. The
-   // state is pushed to the plugins, which are expected to leave their untouched pixels untouched only when enabled.
-   if (m_wndId == VPXWindowId::VPXWINDOW_Backglass)
-   {
-      AddItem(std::make_unique<InGameUIItem>(InGameUIItem::LabelType::Header, "Plugin rendering"s));
-      AddItem(std::make_unique<InGameUIItem>(
-                 Settings::m_propPlayer_AncillaryLayering, //
-                 [this]() { return m_player->GetAncillaryLayering(); }, // Live
-                 [this](const bool v)
-                 {
-                    g_settingsService.GetActiveTableOverrideOrCurrentSettings().SetPlayer_AncillaryLayering(v, false);
-                    m_player->SetAncillaryLayering(v);
-                    RequestRebuild();
-                 }));
-   }
 }
 
 void DisplaySettingsPage::BuildEmbeddedPage()

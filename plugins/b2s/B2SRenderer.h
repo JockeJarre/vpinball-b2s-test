@@ -28,14 +28,11 @@ namespace B2S
 class B2SServer;
 
 // Whether the renderer leaves the areas it does not draw untouched: our 'Transparent parts shine through'
-// setting, and only while the host allows layered rendering (SetHostLayeringEnabled). The server declares it
-// through AncillaryRendererDef::isLayeredOverlay when the host collects the renderers of a window, so that the
-// host composites the less prioritized renderers below us, and the drawing itself follows it
+// setting. The server declares it through AncillaryRendererDef::isLayeredOverlay when the host collects the
+// renderers of a window, so that the host composites the less prioritized renderers below us, and the drawing
+// itself follows it: one and the same setting drives both, applied when the renderers are collected, i.e. at
+// table load (restarting the table is enough for a change to be honored)
 bool ShineThrough();
-
-// State of the layering master switch of the host, pushed at every renderer collection (see
-// GetAncillaryRendererMsg::layeringEnabled): off, the host does not composite the window and we must draw opaque
-void SetHostLayeringEnabled(bool enabled);
 
 class B2SRenderer final
 {
@@ -54,7 +51,15 @@ private:
    std::function<void()> ResolveRomPropUpdater(const std::vector<StateSrcId>& items, float* value, const B2SRomIDType romIdType, const int romId, const bool romInverted = false, const int romValue = 0, const bool holdSwitchOn = false) const;
    bool RenderBackglass(VPXRenderContext2D* context, class B2SServer* server);
    bool RenderScoreView(VPXRenderContext2D* context, class B2SServer* server);
-   void RenderDisplays(VPXRenderContext2D* ctx, B2SServer* server, int target, VPXTexture backImage);
+   void RenderDisplays(VPXRenderContext2D* ctx, B2SServer* server, int target, VPXTexture backImage, bool behindArtworkPass = false, bool allowBehindArtwork = false);
+
+   // Whether the artwork a display is drawn on has an opening over the area of the display, so that the display
+   // belongs behind it (see RenderBackglass). Sampled from the artwork and cached per (texture, area) pair, the
+   // artwork of a table not changing while it runs
+   bool ArtworkHasOpening(VPXTexture artwork, int x, int y, int w, int h);
+
+   struct ArtworkOpening { VPXTexture texture; int x, y, w, h; bool opening; };
+   vector<ArtworkOpening> m_artworkOpenings;
    // behindCanvas selects the pass: bulbs flagged SnippitBehindCanvas are drawn before the background image, the others after it
    void RenderBulbs(VPXRenderContext2D* ctx, const B2SServer* server, const vector<std::unique_ptr<B2SBulb>>& bulbs, float elapsed, B2SDualMode dualMode, bool behindCanvas);
    // Draws the part of the current background image (as the window shows it) under a rectangle, in output pixels

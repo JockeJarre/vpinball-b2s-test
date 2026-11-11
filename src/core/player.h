@@ -288,13 +288,6 @@ public:
    int GetAncillaryRendererPriority(VPXWindowId window, const string& id) const;
    void SetAncillaryRendererPriority(VPXWindowId window, const string& id, int priority);
 
-   // Master switch of the ancillary window renderer layering (see AncillaryRendererDef::isLayeredOverlay): when it
-   // is off, no window is composited and the renderers are asked to draw opaque (nothing shows through them
-   // anyway, and the areas a transparent renderer leaves would show the window clear). Kept as a live value, so
-   // the render loop never reads settings, and pushed to the renderers when they are collected.
-   bool GetAncillaryLayering() const { return m_ancillaryLayering; }
-   void SetAncillaryLayering(bool enabled);
-
    bool IsVR() const { return m_vrDevice != nullptr; }
 
    int GetCabinetAutoFitMode() const { return m_cabinetAutoFitMode; }
@@ -311,8 +304,6 @@ private:
    unsigned int m_getAuxRendererId = 0, m_onAuxRendererChgId = 0;
    // Live (unsaved) renderer priorities, seeded from settings when renderers are collected
    std::map<string, int, std::less<>> m_ancillaryWndRendererPriorities[VPXWindowId::VPXWINDOW_Topper + 1];
-   // Live value of the 'Global / AncillaryLayering' setting, seeded from settings when renderers are collected
-   bool m_ancillaryLayering { false };
 
    int m_cabinetAutoFitMode = 0;
    float m_cabinetAutoFitPos = 0.05f;

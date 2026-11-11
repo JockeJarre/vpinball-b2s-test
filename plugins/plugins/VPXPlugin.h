@@ -137,6 +137,13 @@ typedef struct VPXRenderContext2D
       //
       const float srcX, const float srcY, const float srcW, const float srcH); // coordinates in source surface (0..srcWidth, 0..srcHeight)
    void* rendererData; // Custom renderer data pointer to be used by the rendering functions
+   // Set to a non zero value by the host when the ancillary window is composited: every renderer claiming the window
+   // is drawn, from the least to the most prioritized one, so the areas one renderer leaves untouched show the
+   // renderers below it. Zero, the renderer shown is the only one drawn, and the areas it leaves untouched show the
+   // window clear: a renderer which draws with alpha is then expected to cover the whole window (see
+   // AncillaryRendererDef::isLayeredOverlay). The field is written at every ancillary render call, and is zero for a
+   // host which does not know it (an embedded 3D render is never composited)
+   int isLayered;
 } VPXRenderContext2D;
 
 typedef struct AncillaryRendererDef
@@ -153,13 +160,6 @@ typedef struct AncillaryRendererDef
    int isLayeredOverlay;
 } AncillaryRendererDef;
 
-// Ancillary window layering: the host has a master switch for the transparent/layered rendering of the ancillary
-// window renderers. It is carried in GetAncillaryRendererMsg with sentinel values, so that a renderer can tell an
-// host which does not know the field at all (it then holds whatever the message was filled with, never a sentinel)
-// from an host which tells it that layering is off. Both cases mean the same thing for the renderer: draw opaque.
-#define VPXPI_ANCILLARY_LAYERING_DISABLED 0x5A5A0000
-#define VPXPI_ANCILLARY_LAYERING_ENABLED  0x5A5A0001
-
 typedef struct GetAncillaryRendererMsg
 {
    // Request
@@ -168,12 +168,6 @@ typedef struct GetAncillaryRendererMsg
    // Response
    unsigned int count; // Number of entries, also position to put next entry
    AncillaryRendererDef* entries; // Pointer to an array of maxEntryCount entries to be filled
-   // Master switch of the host, VPXPI_ANCILLARY_LAYERING_ENABLED / VPXPI_ANCILLARY_LAYERING_DISABLED, written by
-   // the host on every request. A renderer declaring 'isLayeredOverlay' must also stop leaving areas untouched
-   // when the host says layering is off: the host then does not composite the window, so those areas would show
-   // the window clear instead of the renderers below it. Anything else (an host predating this field) must be
-   // read as 'not enabled'.
-   int layeringEnabled;
 } GetAncillaryRendererMsg;
 
 

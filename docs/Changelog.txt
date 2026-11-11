@@ -52,7 +52,11 @@ FEATURES:
   'Player / AncillaryLayering', off by default, saved globally or as a table override) turns the layered rendering of the
   ancillary window renderers off for all the plugins at once: off, no window is composited and the renderers are told to
   draw opaquely, so the areas a transparent renderer would leave open show nothing. Applied live, no table reload needed
-
+- The dot matrix displays placed on the backglass are drawn *behind* the artwork when that artwork has an opening over their
+  area (the die cut of a grill, the window of a backbox): the openings reveal the display and its opaque parts (mesh, frame,
+  screws) cover it, as in a real backbox. It is read from the alpha of the artwork, there is nothing to set, and it applies when
+  the window is composited (the switch above) and the B2S Pro 'Transparent parts shine through' setting is on. With an opaque
+  artwork, the displays keep being drawn on top, as before
 
 - Folder layout has been redesigned:
   . Folder layout now conforms to platform requirements, with the application stored in its read-only application folder (for example 'C:\Program Files' under Windows),
