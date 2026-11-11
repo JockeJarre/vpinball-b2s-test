@@ -720,7 +720,16 @@ void B2SServer::OnGetRenderer(const unsigned int, void* userData, void* msgData)
    if ((msg->window == VPXWindowId::VPXWINDOW_Backglass) || (msg->window == VPXWindowId::VPXWINDOW_ScoreView))
    {
       if (msg->count < msg->maxEntryCount)
-         msg->entries[msg->count] = me->m_ancillaryRendererDef;
+      {
+         // The layered rendering capability follows the 'Transparent parts shine through' setting: opaque, we
+         // cover the window and the host spares drawing the less prioritized renderers below us; transparent, we
+         // leave untouched areas for them to shine through. The setting setter announces a renderer list
+         // refresh (see the hand rolled setting in B2SRenderer.cpp), so what is declared here is in step with
+         // what is really drawn
+         AncillaryRendererDef rendererDef = me->m_ancillaryRendererDef;
+         rendererDef.isLayeredOverlay = ShineThrough() ? 1 : 0;
+         msg->entries[msg->count] = rendererDef;
+      }
       msg->count++;
    }
 }

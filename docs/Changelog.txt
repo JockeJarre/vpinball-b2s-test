@@ -41,6 +41,13 @@ FEATURES:
 - B2S Pro: the plugin is built under its own 'plugins/b2s-pro' plugin folder, with the 'B2SPro' plugin id and the
   'plugin-b2spro' / 'plugin-b2spro64' libraries, so that it can be installed next to the stock B2S plugin without
   replacing it
+- Backglass window renderers can now be composited: the host draws every renderer claiming the window, from the
+  least to the most prioritized one of the display page 'Renderer priority' settings, all in one pass, so the less
+  prioritized ones (PinUp Player, ...) shine through the areas a renderer above them leaves untouched. It is used
+  by the B2S Pro plugin: with 'Transparent parts shine through' on it declares itself a layered renderer, and the
+  backglass then lets the PinUp player underneath show through its transparent areas. A renderer which is not
+  layered (all the other plugins, and B2S Pro with the setting off) keeps the previous behavior: the most
+  prioritized renderer claiming the window is the only one drawn
 
 - Folder layout has been redesigned:
   . Folder layout now conforms to platform requirements, with the application stored in its read-only application folder (for example 'C:\Program Files' under Windows),

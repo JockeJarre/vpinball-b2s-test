@@ -31,10 +31,32 @@ MSGPI_INT_VAL_SETTING(keepAspectRatioProp, "KeepAspectRatioPercent", "Keep aspec
    "distortion)", true, 0, 100, 100);
 MSGPI_BOOL_VAL_SETTING(centerVerticallyProp, "CenterVertically", "Center vertically",
    "Center the images vertically in the black area left by 'Keep aspect ratio' (turn off to put them on the floor)", true, true);
-MSGPI_BOOL_VAL_SETTING(shineThroughProp, "ShineThrough", "Transparent parts shine through",
-   "Leave the areas the backglass images leave transparent unpainted: the plugin draws no backing color under the artwork and "
-   "keeps the area around it (the 'Keep aspect ratio' leftover) unpainted, so what the window shows there stays visible. Turned "
-   "off the view stays fully opaque: the authored backing color under the artwork, the leftover area black", true, false);
+// The host composites the less prioritized renderers of the window below us (see AncillaryRendererDef::
+// isLayeredOverlay) only while we declare that we leave untouched areas, so a change of this setting must be
+// announced: it is hand rolled from MSGPI_BOOL_VAL_SETTING for the setter to broadcast the renderer list
+// refresh, which makes the host ask us for the renderers again (OnGetRenderer fills the flag from here).
+static const MsgPluginAPI* s_msgApi = nullptr;
+static unsigned int s_endpointId = 0;
+static unsigned int s_auxRendererChgId = 0;
+static int shineThroughProp_Val = 0;
+static int shineThroughProp_Get() { return shineThroughProp_Val; }
+static void shineThroughProp_Set(int v)
+{
+   if (shineThroughProp_Val == v)
+      return;
+   shineThroughProp_Val = v;
+   if (s_msgApi != nullptr)
+      s_msgApi->BroadcastMsg(s_endpointId, s_auxRendererChgId, nullptr);
+}
+static MsgSettingDef shineThroughProp { .propId = "ShineThrough", .name = "Transparent parts shine through",
+   .description = "Leave the areas the backglass images leave transparent unpainted: the plugin draws no backing color under the artwork and "
+      "keeps the area around it (the 'Keep aspect ratio' leftover) unpainted, so what the window shows there stays visible. Turned "
+      "off the view stays fully opaque: the authored backing color under the artwork, the leftover area black",
+   .isUserEditable = 1, .type = MSGPI_SETTING_TYPE_BOOL, .boolDef = { 0, &shineThroughProp_Get, &shineThroughProp_Set } };
+
+// Whether our own drawing leaves untouched areas (the 'Transparent parts shine through' setting). Read by the
+// server when the host collects our window renderers, to set AncillaryRendererDef::isLayeredOverlay
+bool ShineThrough() { return shineThroughProp_Get() != 0; }
 
 static const char* dualModeValues[] = { "Authentic", "Fantasy" };
 MSGPI_ENUM_VAL_SETTING(dualModeProp, "DualMode", "Dual Mode", "Active mode for dual backglasses (authentic or fantasy)", true, 1, 2, dualModeValues, 1);
@@ -183,6 +205,11 @@ VPXTexture B2SRenderer::GetReelOverlayTexture(const B2SScore& reel, int overlayW
 
 void B2SRenderer::RegisterSettings(const MsgPluginAPI* const msgApi, unsigned int endpointId)
 {
+   // Needed by the 'Transparent parts shine through' setter to announce a renderer list change, see below. Kept
+   // for the whole plugin life (settings are registered once, renderers and servers come and go with tables)
+   s_msgApi = msgApi;
+   s_endpointId = endpointId;
+   s_auxRendererChgId = msgApi->GetMsgID(VPXPI_NAMESPACE, VPXPI_EVT_AUX_RENDERER_CHG);
    msgApi->RegisterSetting(endpointId, &showGrillProp);
    msgApi->RegisterSetting(endpointId, &dualModeProp);
    msgApi->RegisterSetting(endpointId, &upgradedSegRenderingProp);

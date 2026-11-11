@@ -2783,7 +2783,10 @@ void Player::OnAuxRendererChanged(const unsigned int msgId, void* userData, void
                                                                         : "Topper"s;
       GetAncillaryRendererMsg getAuxRendererMsg { window, 0, 0, nullptr };
       m_msgApi->BroadcastMsg(me->m_pluginAPI.GetVPXEndPointId(), me->m_getAuxRendererId, &getAuxRendererMsg);
-      me->m_ancillaryWndRenderers[window].resize(getAuxRendererMsg.count);
+      // Value initialized on purpose: a plugin built against an older, smaller AncillaryRendererDef only fills
+      // the fields it knows, so the fields added later (isLayeredOverlay) must read as 0 (the behavior those
+      // plugins have: they cover the whole window) and not as whatever the allocation happened to hold
+      me->m_ancillaryWndRenderers[window].assign(getAuxRendererMsg.count, AncillaryRendererDef {});
       getAuxRendererMsg = { window, getAuxRendererMsg.count, 0, me->m_ancillaryWndRenderers[window].data() };
       m_msgApi->BroadcastMsg(me->m_pluginAPI.GetVPXEndPointId(), me->m_getAuxRendererId, &getAuxRendererMsg);
       auto& priorities = me->m_ancillaryWndRendererPriorities[window];

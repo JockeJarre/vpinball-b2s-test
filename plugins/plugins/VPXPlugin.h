@@ -146,6 +146,11 @@ typedef struct AncillaryRendererDef
    const char* description;   // Human readable description of the renderer
    void* context;             // Custom context to be passed when requesting rendering
    int(MSGPIAPI* Render)(VPXRenderContext2D* renderCtx, void* context);
+   // Set to a non zero value by a renderer which draws with alpha and leaves the areas it does not cover
+   // untouched: the host then composites the less prioritized renderers of the same window below it, so they
+   // shine through the areas this one leaves. Zero (the default, also for plugins built before this field
+   // existed) means the renderer covers the whole window and is therefore the only one drawn.
+   int isLayeredOverlay;
 } AncillaryRendererDef;
 
 typedef struct GetAncillaryRendererMsg

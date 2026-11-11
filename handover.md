@@ -26,6 +26,7 @@ Date: 2026-11-09 · Branch `b2s-pro`, code tip `ffe11e1cf` (this document and it
 | `cae1a15e6` | 11:54 | **Fix**: DMD overlays at the wrong height with `Keep aspect ratio` on (§2, stage 8) |
 | `f1ea3dd5f` | 12:19 | **`Keep aspect ratio`** becomes a percentage 0..100 (§2, stage 9) |
 | `ffe11e1cf` | 17:48 | **`Transparent parts shine through`** setting (§11) |
+| *(branch tip)* | 05:14 | **Composited window renderers**: the less prioritized ones (PinUp player, …) shine through the areas the backglass leaves untouched — host loop + the `isLayeredOverlay` declaration (§12) |
 
 `git diff --stat 9a111ce35^..HEAD` — 19 files, +275 / −94.
 
@@ -244,6 +245,10 @@ the B2S Pro release goes next to it, loose matching has to be turned off for it)
   `plugin-b2spro[64]`) but not the build. CMake, the VS projects and the build script now emit
   `plugin-b2spro` / `plugin-b2spro64` in `plugins/b2s-pro/`, so B2S Pro installs **next to** the
   stock B2S plugin instead of replacing it.
+* **Plugin-only so far**: `Renderer.cpp`, `Window.cpp` and the rest of `src/` are untouched, the branch builds
+  the plugin targets only (`cmake --build build-b2s --target B2SPlugin`). With §12 the branch is no longer
+  plugin-only: it carries the host half of the composited renderers (3 files under `src/` and the shared plugin
+  header), which is where the host/plugin boundary of that feature sits.
 * **CI artifacts**: `Package the plugin` writes `b2s-pro-<platform>-<arch>-<config>.zip` while
   `upload-artifact` still pointed at `b2s-plugin-…`, and with `if-no-files-found: warn` it uploaded
   nothing silently. One `env.PKG_NAME` is now the single source of truth for zip name, artifact
@@ -381,8 +386,16 @@ and the DMD quad placement fix in FIXES).
 10. **Test the shine-through flag** (`ffe11e1cf`, §11) on a backglass with transparent pixels (a die-cut
     canvas): with the flag on, the authored backing color under the artwork and the black leftover area
     must be gone. On a dedicated backglass window those areas stay black — the host opaque clear, §11.
-11. **Decide the host side of the shine-through** (§11): a transparent ancillary-window clear is a host
-    change, outside the plugin-only scope of this branch.
+11. **Shine-through, host side, done for one case** (§12): compositing the less prioritized window renderers is
+    implemented (§12). Revealing the **playfield** under an embedded backglass (the alpha of the region clear,
+    §11) and revealing the **desktop** through a dedicated window (translucent swapchain + OS layered window)
+    are still open, and stay outside the plugin.
+12. **Test the composited renderers** (§12): B2S Pro at priority 60, PinUp player (`PUP`) at 40 on the Backglass
+    display page, `Transparent parts shine through` on — the PinUp content must show through the backglass'
+    transparent areas. With the setting off, PinUp must not be drawn at all (the legacy path, check the frame
+    time of a PUP-only setup is unchanged).
+13. **Test builds**: in a build where the stock B2S plugin and B2S Pro are both enabled, set the stock B2S
+    priority to `-1` — with composited renderers both would draw the backglass, one over the other (§12).
 
 ---
 
@@ -424,3 +437,74 @@ If the host side is picked up, the plugin does not have to invent a channel: the
 same value. `VPXRenderContext2D::rendererData` is **not** such a channel: the host fills it with its own
 `AncillaryRenderSetup` (`Renderer.cpp:1591`), it is not plugin-provided.
 
+
+---
+
+## 12. Composited window renderers (the branch tip)
+
+§11 makes the plugin leave pixels unpainted; **what shows there is the host's decision**. The case asked for is
+the one VPX already has settings for: the PinUp player sits at a lower priority than the backglass and should
+shine *through* it.
+
+**How the host chose a renderer before** (read from the code, all paths in this repo):
+
+- `Player::OnAuxRendererChanged` (`src/core/player.cpp:2774`) collects what the plugins declare for the
+  Backglass / ScoreView / Topper windows, registers a `Priority.<renderer id>` setting per window section
+  ("Higher values are priorized other lower ones"), sorts the list **descending** and erases renderers whose
+  priority is `< 0`.
+- `Renderer::RenderAncillaryWindow` (`src/renderer/Renderer.cpp:2213`) walked that list and **stopped at the
+  first renderer which claimed the window**. So a lower-priority PinUp player was not dimmed, not covered —
+  it was simply never drawn, whatever its priority was.
+
+**What the host does now** (3 files):
+
+| File | Change |
+|---|---|
+| `plugins/plugins/VPXPlugin.h:147` | `AncillaryRendererDef` gains `int isLayeredOverlay;` — declared by a renderer which draws with alpha and leaves the areas it does not cover untouched |
+| `src/core/player.cpp:2786` | the collected entries are value initialized (`assign(count, AncillaryRendererDef {})`): a plugin built against the older 5-field struct fills only the fields it knows, so the new one reads 0 (= the behaviour those plugins have), never whatever the allocation held |
+| `src/renderer/Renderer.cpp:2207` | when **no** renderer of the window declares layering, the winner-takes-all loop is kept exactly as before; when one does, every claiming renderer is drawn, from the least to the most prioritized, each on a freshly reset `VPXRenderContext2D` and with `ResetRenderState()` between them, all in the same pass |
+
+The order is bottom up because the drawing order is the stacking order: each renderer alpha blends onto what the
+ones below it left, so the ones below show through the untouched areas of the ones above. Nothing else is needed:
+
+- **no clear between renderers, no new render target, no shader change** — the plugin draws (`DrawImage`,
+  `DrawDisplay`, the segment renderers) are plain alpha blends into the window target
+- the dedicated window target is already cleared to `0x00000000`, alpha 0 (`Renderer.cpp:2205`)
+- the content bounds kept are the last writer's, i.e. the most prioritized claimer — as in the non composited
+  case, so the "fit the output to the content" behaviour follows the renderer on top
+- **cost**: compositing draws renderers which end up covered by an opaque one. That is the price of the feature,
+  and the reason it is declared by the renderers rather than always on
+- the **embedded** path is untouched: its region clear stays the opaque quad of §11, so on an embedded backglass
+  the areas left open show black. Revealing the playfield scene there is the one-liner of §11, still open
+- ABI, both directions: a 6-field plugin on a 5-field host is copied with the host's (smaller) size, the extra
+  field is simply not read; a 5-field plugin on a 6-field host reads 0 thanks to the value initialization above
+
+**How the plugin declares it** (`B2SPro`):
+
+- `B2SServer::OnGetRenderer` copies the renderer def and sets `isLayeredOverlay` from a `ShineThrough()`
+  accessor: what is declared is exactly what the plugin draws that frame
+- `Transparent parts shine through` is hand rolled from `MSGPI_BOOL_VAL_SETTING` (`B2SRenderer.cpp`) so that its
+  setter broadcasts `VPXPI_EVT_AUX_RENDERER_CHG`: the host re-collects the renderers and picks the new
+  declaration up. The statics the setter needs (`s_msgApi`, `s_endpointId`, `s_auxRendererChgId`) are set in
+  `B2SRenderer::RegisterSettings`, which runs once per plugin load and is kept for the whole plugin life (a
+  renderer is created and destroyed per table, the settings and the registration are not)
+- with the setting off the plugin is opaque, declares 0, and the host spares drawing what would be covered:
+  **no cost, and the previous behaviour**
+
+| Backglass page setup | drawn (bottom → top) |
+|---|---|
+| B2S Pro 60 / PUP 40, `ShineThrough` off | B2S Pro alone (PUP not drawn, as before) |
+| B2S Pro 60 / PUP 40, `ShineThrough` on | PUP, then B2S Pro: PinUp through the backglass' transparent areas |
+| B2S Pro 60 / PUP 40, PUP has nothing to show | B2S Pro alone |
+| B2S Pro 60 (layered) / PUP 40 / Nixie 20 | Nixie, PUP, B2S Pro: PUP covers Nixie (higher priority), B2S Pro reveals both where transparent |
+
+**Renderer id, in the coexistence build**: the priority key is the renderer id, and the standalone build declares
+`B2SPro` while the stock plugin declares `B2S` — independent settings. Both enabled at priority ≥ 0 with a
+composited window draws the backglass **twice**, one over the other: set the stock B2S priority to `-1` in test
+builds (it is erased from the list). When B2S Pro replaces B2S there is a single `B2S` renderer (the built-in
+plugin table, `src/core/player.cpp:160`), so this is moot.
+
+**Checked**: the walk was exercised as a standalone stub (`/tmp/host_layer_test.cpp`, 10 cases, all passing):
+nobody declares layering with two renderers → exactly today's draws; single legacy renderer; nobody claims;
+layered top over opaque PUP; layered top which does not claim; layered with an opaque claimer in between; all
+layered; single layered renderer; nobody claims with one layered. The plugin builds natively and with mingw.

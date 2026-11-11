@@ -2208,13 +2208,42 @@ void Renderer::RenderAncillaryWindow(VPXWindowId window, const VPX::RenderOutput
    // A quarter turn swaps what the renderers should lay out for, the projection then rotates it onto the output
    const int rotation = GetAncillaryContentRotation(window, output);
    const bool swapAxes = (rotation % 180) != 0;
-   VPXRenderContext2D& context
-      = GetAncillaryRenderContext(window, static_cast<float>(swapAxes ? m_outputH : m_outputW), static_cast<float>(swapAxes ? m_outputW : m_outputH), true, isOutputLinear, 0.f);
-   for (auto& renderer : ancillaryWndRenderers)
+   const float contentW = static_cast<float>(swapAxes ? m_outputH : m_outputW);
+   const float contentH = static_cast<float>(swapAxes ? m_outputW : m_outputH);
+   // The renderers are sorted by descending priority. By default the most prioritized one which claims the
+   // window is the one shown, and the less prioritized ones are not drawn at all (they would be covered).
+   // A renderer declaring 'isLayeredOverlay' (see AncillaryRendererDef) leaves the areas it does not draw
+   // untouched: such a window is composited, drawing every claiming renderer from the least to the most
+   // prioritized one, all in the very same pass, so each one alpha blends onto what the ones below it left,
+   // and those below shine through the untouched areas of the ones above them. Compositing therefore costs
+   // drawing the renderers which end up covered, which is the price of the feature and why it is declared by
+   // the renderers themselves. Since they are drawn in one pass, the content bounds kept are those of the last
+   // one drawn, that is of the most prioritized claimer, as in the non composited case.
+   const bool composited = std::ranges::any_of(ancillaryWndRenderers,
+      [](const AncillaryRendererDef& renderer) { return renderer.isLayeredOverlay != 0; });
+   if (!composited)
    {
-      rendered = renderer.Render(&context, renderer.context);
-      if (rendered)
-         break;
+      VPXRenderContext2D& context = GetAncillaryRenderContext(window, contentW, contentH, true, isOutputLinear, 0.f);
+      for (auto& renderer : ancillaryWndRenderers)
+      {
+         rendered = renderer.Render(&context, renderer.context);
+         if (rendered)
+            break;
+      }
+   }
+   else
+   {
+      for (int i = static_cast<int>(ancillaryWndRenderers.size()) - 1; i >= 0; --i)
+      {
+         const AncillaryRendererDef& renderer = ancillaryWndRenderers[i];
+         // Each renderer lays its own content out (it sets up its own source surface), so each one gets a
+         // freshly reset context, and the render state is reset between them: what one renderer leaves in the
+         // render states is not a starting point the next one should rely on
+         VPXRenderContext2D& context = GetAncillaryRenderContext(window, contentW, contentH, true, isOutputLinear, 0.f);
+         rd->ResetRenderState();
+         if (renderer.Render(&context, renderer.context))
+            rendered = true;
+      }
    }
    m_ancillaryWndRendered[window] = rendered;
 
