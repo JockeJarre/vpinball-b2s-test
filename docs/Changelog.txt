@@ -48,10 +48,10 @@ FEATURES:
   backglass then lets the PinUp player underneath show through its transparent areas. A renderer which is not
   layered (all the other plugins, and B2S Pro with the setting off) keeps the previous behavior: the most
   prioritized renderer claiming the window is the only one drawn
-- The 'Transparent Plugin Rendering' master switch (in game Display page, ini key 'Global / AncillaryLayering', off
-  by default) turns the layered rendering of the ancillary window renderers off for all the plugins at once: off, no
-  window is composited and the renderers are told to draw opaquely, so the areas a transparent renderer would leave
-  open show nothing. Applied live, no table reload needed
+- The 'Transparent Plugin Rendering' master switch (in game Display -> Backglass display page, ini key
+  'Player / AncillaryLayering', off by default, saved globally or as a table override) turns the layered rendering of the
+  ancillary window renderers off for all the plugins at once: off, no window is composited and the renderers are told to
+  draw opaquely, so the areas a transparent renderer would leave open show nothing. Applied live, no table reload needed
 
 
 - Folder layout has been redesigned:

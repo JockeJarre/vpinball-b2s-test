@@ -6,8 +6,8 @@ PropString(Version, VPinball, "VPX Version"s, "VPX version that saved this file"
 PropBool(Global, EnableLog, "Enable Log"s, "Enable general logging to the vinball.log file"s, true);
 PropBool(Global, LogScriptOutput, "Log Script Output"s, "Enable script logging output"s, true);
 PropBool(Global, ResetLogOnPlay, "Reset Log on Play"s, "Reset the log file when a table is played"s, g_isMobile);
-// Ancillary window rendering (backglass, score view, topper)
-PropBool(Global, AncillaryLayering, "Transparent Plugin Rendering"s, "Allow the window renderer plugins (backglass, score view, topper) to draw with transparency: the less prioritized renderers of a window are then drawn below the ones which leave areas untouched, so they shine through. When disabled, only the most prioritized renderer claiming a window is drawn, and it covers the whole window.", false);
+// Ancillary window renderer layering (backglass, score view, topper): master switch, contextual like the display settings
+PropBoolDyn(Player, AncillaryLayering, "Transparent Plugin Rendering"s, "Allow the window renderer plugins (backglass, score view, topper) to draw with transparency: the less prioritized renderers of a window are then drawn below the ones which leave areas untouched, so they shine through. When disabled, only the most prioritized renderer claiming a window is drawn, and it covers the whole window.", false);
 // Profile settings
 PropString(Global, ProfileName, "Profile Name"s, "Profile name spliced into the table ini filename as '<table><profile>.ini' to select a profile specific override. Empty disables profiles"s, ""s);
 

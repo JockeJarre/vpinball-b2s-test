@@ -125,7 +125,7 @@ Player::Player(PinTable *const table, const PlayMode playMode, LoadProgress &loa
    // Seed the live value of the ancillary window renderer layering master switch: it is a 'Global' setting,
    // read once here (the in game UI applies it live through SetAncillaryLayering and persists it), so neither
    // the render loop nor the renderer collection ever reads settings for it
-   m_ancillaryLayering = g_settingsService.GetActiveSettings().GetGlobal_AncillaryLayering();
+   m_ancillaryLayering = g_settingsService.GetActiveSettings().GetPlayer_AncillaryLayering();
    m_ptable->AddRef();
 
    constexpr float progressStartupLength = 5.f;

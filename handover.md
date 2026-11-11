@@ -438,9 +438,10 @@ The master switch of the whole transparency/layering feature is not on this page
 14. **Test the layering master switch** (§12.1): off, a `Transparent parts shine through` backglass must stay fully
     opaque (no black holes, nothing drawn below) and the frame time of a PUP-only setup must be unchanged; on, item
     12 applies. Check the value survives a restart and that turning it on mid session needs no table reload.
-15. **Open for the promotion**: the master switch is a `Global` (app level) setting. A per-table control would need
-    a `Dyn` (contextual) property, which changes the ini key handling; nothing in the renderer layer depends on the
-    section it lives in.
+15. **Master switch storage**: `Player / AncillaryLayering`, contextual (`PropBoolDyn`), so it can be saved globally
+    or as a table override, and it is applied live. The key moved from `Global / AncillaryLayering` (the first,
+    unsaveable implementation): a value stored under the old key is not read back. Nothing in the renderer layer
+    depends on the section, so moving it to another one at the promotion is a two line change.
 
 ---
 
@@ -558,7 +559,7 @@ nobody declares layering with two renderers → exactly today's draws; single le
 layered top over opaque PUP; layered top which does not claim; layered with an opaque claimer in between; all
 layered; single layered renderer; nobody claims with one layered. The plugin builds natively and with mingw.
 
-### 12.1 Master switch (`Global / AncillaryLayering`, default off)
+### 12.1 Master switch (`Player / AncillaryLayering`, default off)
 
 The feature above is global cost (a whole renderer drawn and covered) and global semantics (pixels of one plugin
 appearing in the window of another). One host switch turns it off for every plugin at once, and it is off by
@@ -567,9 +568,9 @@ turned on pays nothing for the feature.
 
 | Piece | Where |
 |---|---|
-| Setting `Global / AncillaryLayering`, bool, default **false** | `src/core/Settings_properties.inl` (the app level section, next to `EnableLog`, …) |
-| In game UI: Display page, header *Plugin rendering*, item *Transparent Plugin Rendering* | `src/ui/live/ingameui/DisplaySettingsPage.cpp`, `DisplayHomePage::BuildPage`, under the Backglass / ScoreView / Topper rows |
-| Live values | `Player::m_ancillaryLayering`, `Renderer::m_ancillaryLayering`. **No settings lookup in the render loop**: both cached. The player seeds its copy once at construction and `Player::SetAncillaryLayering` is the only writer (the in game UI persists the setting, an external ini edit needs a restart); the renderer is seeded in `UpdateSettings` (table load) and pushed by the player |
+| Setting `Player / AncillaryLayering`, `PropBoolDyn` (contextual), default **false** | `src/core/Settings_properties.inl`. Contextual, like the display settings: saved **globally** or as a **table override**, ini key `Player / AncillaryLayering` |
+| In game UI: **Display → Backglass display** page, header *Plugin rendering*, item *Transparent Plugin Rendering* | `src/ui/live/ingameui/DisplaySettingsPage.cpp`, end of `DisplaySettingsPage::BuildWindowPage`, gated on `m_wndId == VPXWindowId::VPXWINDOW_Backglass`. That page is `SaveMode::Both`, so the item gets the page's *save globally / save as table override* buttons |
+| Live values | `Player::m_ancillaryLayering`, `Renderer::m_ancillaryLayering`. **No settings lookup in the render loop**: both cached. The player seeds its copy from the active settings at construction, the renderer in `UpdateSettings` (table load), and `Player::SetAncillaryLayering` is the only writer. The UI item both applies live and writes the value through `GetActiveTableOverrideOrCurrentSettings().SetPlayer_AncillaryLayering(v, false)`, the pattern of the other items of the page: the toggle takes effect immediately, the page's Save then stores it globally (resetting the override) or as a table override. An external ini edit is picked up at the next table load |
 | Gate | `Renderer::RenderAncillaryWindow`: `composited = m_ancillaryLayering && any renderer declares isLayeredOverlay`. Off, the winner-takes-all loop runs, byte for byte the shipped behaviour |
 | Pushed to the plugins | `GetAncillaryRendererMsg` gains `int layeringEnabled`, written at each collection with the sentinels `VPXPI_ANCILLARY_LAYERING_ENABLED` / `VPXPI_ANCILLARY_LAYERING_DISABLED` |
 | Plugin side | `B2SRenderer::SetHostLayeringEnabled`; `ShineThrough()` = host master switch **and** our own setting, and it is what the **drawing** tests (canvas backing, padding), so the plugin never leaves areas open when nothing is composited below it |
@@ -587,3 +588,9 @@ page.
 
 **Live**: `Player::SetAncillaryLayering` updates the renderer value and re-collects the renderers, which pushes the
 state to the plugins and makes them re-declare. No table reload, no restart.
+
+**Why it lives on the Backglass display page**: the first version was a row on the Display *home* page, which is
+`SaveMode::None` (its items are expected to persist themselves, and the page shows **no save button**, `InGameUIPage::Render`
+draws a placeholder in place of it). A `Global`, non contextual property cannot be saved by any page save flow, so the
+toggle applied live and was lost on restart, with no way to store it, globally or per table. As a contextual property on
+the per window display page, it saves like every other display setting.
