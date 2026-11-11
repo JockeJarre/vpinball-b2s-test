@@ -3,6 +3,16 @@
 # (it provides plugins/b2s-pro/, so that it does not collide with the official B2S
 # plugin). Manually runnable from any branch, run on pull requests touching the
 # plugin, and run on pushes to master and b2s-pro.
+#
+# Only the Windows x64 build is done here, the flavor of the official BGFX Windows
+# application. The plugin library does not select a renderer (it only calls the host
+# render API), so this is the MSVC build of the plugin, the one to install on a
+# stock Windows VPX. The 32-bit and the mingw builds are made locally with
+# tools/build_b2s_plugin_windows.sh (which documents the root-less cross toolchain
+# recipe), keeping this job a single one: the Windows runners are the scarce
+# resource of this repository. The host sources (src/) are not built here: this job
+# builds the B2SPlugin target only, the composited-renderers host change (handover
+# section 12) needs a full application build.
 name: b2s-plugin
 on:
   workflow_dispatch:
@@ -37,30 +47,16 @@ defaults:
 
 jobs:
   build:
-    name: B2S plugin ${{ matrix.platform }}-${{ matrix.arch }}
+    name: B2S plugin windows-x64
     runs-on: windows-latest
     env:
       # Single source of truth for the zip, artifact and upload path names (a mismatch between
       # the zip written by 'Package the plugin' and the upload 'path' silently uploads nothing,
       # since a missing path is only a warning)
-      PKG_NAME: b2s-pro-${{ matrix.platform }}-${{ matrix.arch }}-${{ inputs.config || 'Release' }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - platform: windows
-            arch: x64
-          - platform: windows
-            arch: x86
-          - platform: windows-mingw
-            arch: x64
+      PKG_NAME: b2s-pro-windows-x64-${{ inputs.config || 'Release' }}
     steps:
       - uses: actions/checkout@v6
-      - if: matrix.platform == 'windows'
-        uses: microsoft/setup-msbuild@v3
-      - if: matrix.platform == 'windows-mingw'
-        name: Install the mingw toolchain
-        run: /c/msys64/usr/bin/bash.exe -l -c "pacman -S --noconfirm --needed make diffutils mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-cmake mingw-w64-ucrt-x86_64-tools"
+      - uses: microsoft/setup-msbuild@v3
       - name: Fetch the PinMAME plugin API header
         # The plugin includes pinmame/PinMAMEPlugin.h from third-party/include/pinmame, which the
         # full dependency build (external.sh) extracts from the pinmame sources. A plugin only
@@ -71,29 +67,10 @@ jobs:
           mkdir -p third-party/include/pinmame
           curl -fsSL https://raw.githubusercontent.com/vpinball/pinmame/master/src/libpinmame/PinMAMEPlugin.h -o third-party/include/pinmame/PinMAMEPlugin.h
           head -3 third-party/include/pinmame/PinMAMEPlugin.h
-      - if: matrix.platform == 'windows'
-        name: Build (MSVC)
+      - name: Build (MSVC, x64)
         run: |
-          if [ "${{ matrix.arch }}" = "x64" ]; then VS_ARCH=x64; else VS_ARCH=Win32; fi
-          cmake -DPLATFORM=windows -DARCH=${{ matrix.arch }} -DBUILD_APP=OFF -DPOST_BUILD_COPY_EXT_LIBS=OFF -A $VS_ARCH -B build
+          cmake -DPLATFORM=windows -DARCH=x64 -DBUILD_APP=OFF -DPOST_BUILD_COPY_EXT_LIBS=OFF -A x64 -B build
           cmake --build build --config "${{ inputs.config || 'Release' }}" --target B2SPlugin --parallel
-      - if: matrix.platform == 'windows-mingw'
-        name: Build (mingw)
-        run: |
-          CURRENT_DIR="$(pwd)"
-          MSYSTEM=UCRT64 /c/msys64/usr/bin/bash.exe -l -c "
-            cd \"${CURRENT_DIR}\" &&
-            cmake -DPLATFORM=windows-mingw -DARCH=${{ matrix.arch }} -DBUILD_APP=OFF -DPOST_BUILD_COPY_EXT_LIBS=OFF -DCMAKE_BUILD_TYPE=${{ inputs.config || 'Release' }} -B build &&
-            cmake --build build --target B2SPlugin -- -j\$(nproc)
-          "
-      - if: matrix.platform == 'windows-mingw'
-        name: Stage the mingw runtime
-        # The mingw built plugin needs its C/C++ runtime DLLs next to it (the MSVC build uses
-        # a static runtime and needs none)
-        run: |
-          cp /c/msys64/ucrt64/bin/libstdc++-6.dll build/plugins/b2s-pro/
-          cp /c/msys64/ucrt64/bin/libgcc_s_seh-1.dll build/plugins/b2s-pro/
-          cp /c/msys64/ucrt64/bin/libwinpthread-1.dll build/plugins/b2s-pro/
       - name: Package the plugin
         # MSVC is a multi-config generator and places the DLL under a per-config subdirectory
         run: |

@@ -1,0 +1,125 @@
+# Builds the Visual Pinball application (BGFX, Windows x64, MSVC) with its plugins, and uploads the
+# runnable folder as a zip artifact. Trimmed down from the upstream vpinball workflow to this single
+# configuration: the Windows runners are the scarce resource of this repository, and this is the
+# flavor the B2S Pro plugin work is tested on. The B2S Pro plugin itself is built separately by
+# b2s-plugin.yml (plugin only, no application).
+#
+# What lands in the artifact: VPinballX_BGFX64.exe + its PDB, the shared libraries, assets, scripts,
+# docs and the plugins folder. Note that this branch builds the B2S plugin of the tree as a
+# standalone plugin too (plugins/b2s-pro/plugin-b2spro64.dll, plugin id B2SPro), while the
+# application also registers the in-tree B2S (src/core/player.cpp:160, id B2S) from the very same
+# sources. Both are then active at once, drawing the backglass twice: delete plugins/b2s-pro from
+# the artifact for an application only test, or set the extra renderer's priority to -1.
+name: vpinball-windows-bgfx
+on:
+  push:
+    branches: [master, b2s-pro]
+  workflow_dispatch:
+    inputs:
+      config:
+        description: "Build configuration"
+        required: false
+        default: Release
+        type: choice
+        options: [Release, Debug]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # First commit of the 10.8 revision series, the base of the revision counter (as upstream)
+  VERSION_START_SHA: ea558e7417f6f06fe567d34f0e33792a141b8e64
+  CONFIG: ${{ inputs.config || 'Release' }}
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build:
+    name: VPinballX_BGFX-windows-x64
+    runs-on: windows-2025-vs2026
+    steps:
+      - uses: microsoft/setup-msbuild@v3
+      - name: Install the MSYS2 build tools
+        # The external dependencies are built by platforms/windows-x64/external.sh, a bash script
+        # driving MSVC/nasm/etc. through the MSYS2 environment
+        run: /c/msys64/usr/bin/bash.exe -l -c "pacman -S --noconfirm --needed make diffutils nasm bison git autoconf automake libtool mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-zlib mingw-w64-ucrt-x86_64-libwinpthread mingw-w64-ucrt-x86_64-libiconv mingw-w64-ucrt-x86_64-cmake mingw-w64-ucrt-x86_64-tools"
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Calculate external cache hash
+        run: echo "EXT_HASH=$(cat platforms/config.sh platforms/windows-x64/external.sh | sha256sum | cut -c1-12)" >> $GITHUB_ENV
+      - name: Restore external cache
+        id: cache
+        uses: actions/cache/restore@v5
+        with:
+          path: external
+          key: windows-x64-${{ env.CONFIG }}-external-${{ env.EXT_HASH }}
+          restore-keys: windows-x64-${{ env.CONFIG }}-external-
+      - name: Build the external dependencies
+        run: BUILD_TYPE=${{ env.CONFIG }} ./platforms/windows-x64/external.sh
+      - name: Clean external cache
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          find external -type d -name ".git" -exec rm -rf {} + 2>/dev/null || true
+          find external -name "*.tar.gz" -delete 2>/dev/null || true
+          find external \( -name "*.o" -o -name "*.obj" \) -delete 2>/dev/null || true
+      - name: Save external cache
+        if: steps.cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v5
+        with:
+          path: external
+          key: windows-x64-${{ env.CONFIG }}-external-${{ env.EXT_HASH }}
+      - name: Package and upload the third-party dependencies
+        # The prebuilt dependency set, the archive the 'Quickstart Windows' section of make/README.md
+        # points at: extract it into third-party/ to build the tree without running external.sh
+        run: |
+          VERSION_MAJOR=$(grep -Eo "VP_VERSION_MAJOR\s+[0-9]+" src/core/vpversion.h | grep -Eo "[0-9]+")
+          VERSION_MINOR=$(grep -Eo "VP_VERSION_MINOR\s+[0-9]+" src/core/vpversion.h | grep -Eo "[0-9]+")
+          VERSION_REV=$(grep -Eo "VP_VERSION_REV\s+[0-9]+" src/core/vpversion.h | grep -Eo "[0-9]+")
+          SHA_SHORT=$(git rev-parse --short "$GITHUB_SHA")
+          TAG="${VERSION_MAJOR}.${VERSION_MINOR}.${VERSION_REV}-${SHA_SHORT}"
+          cd third-party && 7z a -r "../VPinballX-dev-third-party-windows-x64-$CONFIG.zip" .
+          test -s "../VPinballX-dev-third-party-windows-x64-$CONFIG.zip"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: VPinballX-dev-third-party-windows-x64-${{ env.CONFIG }}
+          path: VPinballX-dev-third-party-windows-x64-${{ env.CONFIG }}.zip
+          archive: false
+          if-no-files-found: error
+      - name: Set the version stamp
+        run: |
+          REVISION=$(git rev-list $VERSION_START_SHA..HEAD --count)
+          SHA_SHORT=$(git rev-parse --short "$GITHUB_SHA")
+          perl -i -pe"s/9999/${REVISION}/g" src/core/git_version.h
+          perl -i -pe"s/unknown/${SHA_SHORT}/g" src/core/git_version.h
+          VERSION_MAJOR=$(grep -Eo "VP_VERSION_MAJOR\s+[0-9]+" src/core/vpversion.h | grep -Eo "[0-9]+")
+          VERSION_MINOR=$(grep -Eo "VP_VERSION_MINOR\s+[0-9]+" src/core/vpversion.h | grep -Eo "[0-9]+")
+          VERSION_REV=$(grep -Eo "VP_VERSION_REV\s+[0-9]+" src/core/vpversion.h | grep -Eo "[0-9]+")
+          echo "PKG_NAME=VPinballX_BGFX-${VERSION_MAJOR}.${VERSION_MINOR}.${VERSION_REV}-${REVISION}-${SHA_SHORT}-windows-x64-${CONFIG}" >> $GITHUB_ENV
+      - name: Build (MSVC, BGFX, x64)
+        run: |
+          cmake -DRENDERER=BGFX -DPLATFORM=windows -DARCH=x64 -G "Visual Studio 18 2026" -A x64 -B build
+          cmake --build build --config "$CONFIG" --parallel
+      - name: Stage the application
+        # The plugin is a shared module, MSVC is a multi-config generator: everything of a
+        # configuration sits under build/<config>
+        run: |
+          mkdir stage
+          cp build/"$CONFIG"/VPinballX_BGFX64.exe stage
+          cp build/"$CONFIG"/VPinballX_BGFX*.pdb stage
+          cp build/"$CONFIG"/*.dll stage
+          cp -r build/"$CONFIG"/assets stage
+          cp -r build/"$CONFIG"/plugins stage
+          cp -r build/"$CONFIG"/scripts stage
+          cp -r build/"$CONFIG"/docs stage
+          cd stage && 7z a -r "../$PKG_NAME.zip" .
+          test -s "../$PKG_NAME.zip"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ${{ env.PKG_NAME }}
+          path: ${{ env.PKG_NAME }}.zip
+          archive: false
+          if-no-files-found: error

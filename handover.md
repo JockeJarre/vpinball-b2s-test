@@ -26,7 +26,8 @@ Date: 2026-11-09 · Branch `b2s-pro`, code tip `ffe11e1cf` (this document and it
 | `cae1a15e6` | 11:54 | **Fix**: DMD overlays at the wrong height with `Keep aspect ratio` on (§2, stage 8) |
 | `f1ea3dd5f` | 12:19 | **`Keep aspect ratio`** becomes a percentage 0..100 (§2, stage 9) |
 | `ffe11e1cf` | 17:48 | **`Transparent parts shine through`** setting (§11) |
-| *(branch tip)* | 05:14 | **Composited window renderers**: the less prioritized ones (PinUp player, …) shine through the areas the backglass leaves untouched — host loop + the `isLayeredOverlay` declaration (§12) |
+| `a098ab1ca` | 05:14 | **Composited window renderers**: the less prioritized ones (PinUp player, …) shine through the areas the backglass leaves untouched — host loop + the `isLayeredOverlay` declaration (§12) |
+| *(branch tip)* | 06:15 | **CI**: the workflow set trimmed to Windows x64 — the B2S Pro plugin alone, and the application (BGFX) with its plugins (§5) |
 
 `git diff --stat 9a111ce35^..HEAD` — 19 files, +275 / −94.
 
@@ -254,12 +255,30 @@ the B2S Pro release goes next to it, loose matching has to be turned off for it)
   nothing silently. One `env.PKG_NAME` is now the single source of truth for zip name, artifact
   name and upload path, plus a non-empty test and `error` on missing files. Run `42494729602`
   produced all 3 artifacts.
+* **What CI builds on this branch** (two workflows, Windows x64 only): `b2s-plugin.yml` builds the
+  **B2S Pro plugin alone** (`-DBUILD_APP=OFF --target B2SPlugin`) and uploads `plugins/b2s-pro/` as a
+  zip. `vpinball-windows-bgfx.yml` builds the **application with its plugins**, the official BGFX
+  Windows x64 flavor: MSYS2 tooling, the external dependencies built by
+  `platforms/windows-x64/external.sh` (cached by a hash of `platforms/config.sh` + that script), the
+  version stamp in `src/core/git_version.h`, `cmake -DRENDERER=BGFX -DPLATFORM=windows -DARCH=x64
+  -G "Visual Studio 18 2026" -A x64`, then the `VPinballX_BGFX64.exe` + PDBs + DLLs + `assets`,
+  `plugins`, `scripts`, `docs` zipped — plus the prebuilt `third-party/` archive as its own artifact
+  (the archive the 'Quickstart Windows' section of `make/README.md` points at).
+  The upstream workflows of `origin/master` (`vpinball.yml` with its 8 desktop configurations,
+  `prerelease.yml`, `vpx-test.yml`) are **not on this branch**: `41e85cc22` removed them. These two
+  files are the trimmed replacement for the one configuration tested. The 32-bit and the mingw
+  plugin builds are made locally with `tools/build_b2s_plugin_windows.sh` (§6).
+  In the application artifact the in-tree B2S (`src/core/player.cpp:160`, id `B2S`) and the standalone
+  `plugins/b2s-pro/plugin-b2spro64.dll` (id `B2SPro`) are **both** built from the same sources, so
+  both draw the backglass: drop `plugins/b2s-pro` from the artifact, or set the extra renderer
+  priority to `-1` (§12).
 * **Current CI blocker (infrastructure, not code)**: runs `42504150668` and its re-run end with
   `conclusion: failure`, `steps: []`, `runner_name: ""` after ~6 s. GitHub refuses to provision a
   `windows-latest` runner — Actions spending limit / billing quota
-  (<https://github.com/settings/bits>). The code compiles cleanly locally; options are to raise the
-  spending limit / add a payment method, or move the job to `ubuntu-latest` with the mingw
-  cross-build.
+  (<https://github.com/settings/bits>). The code compiles cleanly locally; the plugin builds are made
+  with the local mingw cross toolchain (§6), the application is not. Options: raise the spending
+  limit / add a payment method, and keep the job count to the minimum, which is why the matrix is a
+  single entry.
 
 ---
 
@@ -375,7 +394,9 @@ and the DMD quad placement fix in FIXES).
    H=208>` on the 2560 × 2880 display, `Keep aspect ratio` at 100 **and** at 50, `Center vertically`
    on **and** off — the DMD rows must sit at 79–93 % of the art, and a ScoreView target display must
    land in the middle of its own window.
-4. **CI**: raise the Actions spending limit, or move the job to `ubuntu-latest` + mingw.
+4. **CI**: both jobs need a Windows runner, and the Actions quota currently refuses to give one (the
+   runs end with `steps: []`, `runner_name: ""`). Raise the spending limit / add a payment method;
+   the workflow set is already trimmed to a single Windows configuration each (§5).
 5. Rebuild the Windows artifacts after any further renderer change (only the mingw ones are current).
 6. Cherry-pick the final commits onto the main `vpinball` repo branch `b2s-keep-aspect-ratio`.
 7. Decide on the 6 upstream fix/diagnostics cherry-picks (§8).
@@ -440,7 +461,7 @@ same value. `VPXRenderContext2D::rendererData` is **not** such a channel: the ho
 
 ---
 
-## 12. Composited window renderers (the branch tip)
+## 12. Composited window renderers (`a098ab1ca`)
 
 §11 makes the plugin leave pixels unpainted; **what shows there is the host's decision**. The case asked for is
 the one VPX already has settings for: the PinUp player sits at a lower priority than the backglass and should
