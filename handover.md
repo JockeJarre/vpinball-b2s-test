@@ -287,7 +287,9 @@ the B2S Pro release goes next to it, loose matching has to be turned off for it)
   **only MSVC compile of the host sources** available (no local app build: the linux `third-party/build-libs`
   are empty, `external.sh` needs system dev packages, §6), so a host syntax error shows up there, not locally.
 * **Test builds on the share** (`\\vpinball\B2Spro`):
-  `VPinballX_BGFX-10.8.1-6689-b6a3a3af9-windows-x64-Release.zip` (202 MB, the runnable folder: `VPinballX_BGFX64.exe`,
+  `VPinballX_BGFX-10.8.1-6693-4ca20cc3f-windows-x64-Release.zip` (202 MB, the current app build: layering master
+  switch on the Backglass display page, saveable; the composited renderer path; the DMD behind the artwork; the B2S Pro
+  plugin built as `plugins/b2s-pro`), plus the older `VPinballX_BGFX-10.8.1-6689-b6a3a3af9-windows-x64-Release.zip` (202 MB, the runnable folder: `VPinballX_BGFX64.exe`,
   PDBs, DLLs, `assets`, `scripts`, `docs`, `plugins/` — **including `plugins/b2s-pro/plugin-b2spro64.dll`**, verified
   in the artifact, so it is the complete §12 test build), and `b2s-pro-windows-x64-msvc-b6a3a3af9.zip` (655 KB,
   `b2s-pro/plugin-b2spro64.dll` + `plugin.cfg`, for an official shipped app). The local mingw zips (9 MB, with the
@@ -438,10 +440,13 @@ The master switch of the whole transparency/layering feature is not on this page
 14. **Test the layering master switch** (§12.1): off, a `Transparent parts shine through` backglass must stay fully
     opaque (no black holes, nothing drawn below) and the frame time of a PUP-only setup must be unchanged; on, item
     12 applies. Check the value survives a restart and that turning it on mid session needs no table reload.
-15. **Master switch storage**: `Player / AncillaryLayering`, contextual (`PropBoolDyn`), so it can be saved globally
-    or as a table override, and it is applied live. The key moved from `Global / AncillaryLayering` (the first,
-    unsaveable implementation): a value stored under the old key is not read back. Nothing in the renderer layer
-    depends on the section, so moving it to another one at the promotion is a two line change.
+15. **Master switch storage**: `Player / AncillaryLayering`, contextual (`PropBoolDyn`), saved globally or as a table
+    override through the page save, applied live. History of the key, since the test builds on the share span it: the
+    `b6a3a3af9` app has the first version (`Global / AncillaryLayering`, a row on the Display **home** page, which is
+    `SaveMode::None` → the toggle applied live and was **never stored**); `ed30cfb36` had **no switch at all** (the
+    commit which was meant to restore an earlier removal is not an ancestor of it, so the switch silently disappeared);
+    `4ca20cc3f` is the version described in §12.1. A value stored under the old key is not read back. Nothing in the
+    renderer layer depends on the section, so moving it to another one at the promotion is a two line change.
 
 ---
 
@@ -598,6 +603,13 @@ active settings, the renderer in `UpdateSettings`).
 draws a placeholder in place of it). A `Global`, non contextual property cannot be saved by any page save flow, so the
 toggle applied live and was lost on restart, with no way to store it, globally or per table. As a contextual property on
 the per window display page, it saves like every other display setting.
+
+**The build must contain it** (that is how it went missing): the switch is host code, so a plugin zip alone can never
+provide it. `ed30cfb36` reached the share with no switch at all, because the commit which restored it after the
+plugin side work was not an ancestor of that commit — `git log --oneline` of the build is the check, and
+`grep -rn AncillaryLayering src/` in the tree of the build is the one minute test. Installed builds on the share to
+be aware of: `b6a3a3af9` (row on the Display home page, not saveable), `ed30cfb36` (no row), `4ca20cc3f` (the row on
+Display → Backglass display, saveable).
 
 ### 12.2 The dot matrix behind the artwork (read from the image, no setting)
 
