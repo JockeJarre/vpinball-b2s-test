@@ -122,6 +122,11 @@ Player::Player(PinTable *const table, const PlayMode playMode, LoadProgress &loa
    g_pplayer = this;
    g_settingsService.SetTableOverride(&m_ptable->GetSettings());
 
+   // Seed the live value of the ancillary window renderer layering master switch: a contextual setting, read once
+   // here (the in game UI applies it live through SetAncillaryLayering and stores it through the page save), so
+   // neither the render loop nor the renderer collection ever reads the settings for it
+   m_ancillaryLayering = g_settingsService.GetActiveSettings().GetPlayer_AncillaryLayering();
+
    m_ptable->AddRef();
 
    constexpr float progressStartupLength = 5.f;
@@ -2819,6 +2824,16 @@ void Player::SetAncillaryRendererPriority(VPXWindowId window, const string& id, 
    m_ancillaryWndRendererPriorities[window][id] = priority;
    // Re-collect and re-sort so the change is directly applied (also restores renderers
    // previously dropped for a negative priority)
+   OnAuxRendererChanged(0, this, nullptr);
+}
+
+void Player::SetAncillaryLayering(const bool enabled)
+{
+   m_ancillaryLayering = enabled;
+   if (m_renderer != nullptr)
+      m_renderer->SetAncillaryLayering(enabled);
+   // The plugins must know it: one which draws with alpha has to draw opaquely again when the window is not
+   // composited, and it is the plugins which declare the capability, so the renderers are re-collected
    OnAuxRendererChanged(0, this, nullptr);
 }
 

@@ -697,6 +697,25 @@ void DisplaySettingsPage::BuildWindowPage()
          AddItem(std::make_unique<InGameUIItem>(InGameUIItem::LabelType::Info, "You may also drag the window to adjust its position"s));
       }
    }
+
+   // The layering of the renderer plugins of a window (the backglass, the score view, the topper): the plugins which
+   // draw with alpha (the B2S Pro plugin with its 'Transparent parts shine through' setting) only do so when this is
+   // on, the window being then drawn from the least to the most prioritized renderer of the 'Renderer priority'
+   // settings, so a renderer below shines through the areas the one above leaves untouched. Off (default), the most
+   // prioritized renderer claiming the window is the only one drawn, and it covers the whole window. Applied live,
+   // stored like the other settings of this page (globally, or as a table override)
+   if (m_wndId == VPXWindowId::VPXWINDOW_Backglass)
+   {
+      AddItem(std::make_unique<InGameUIItem>(InGameUIItem::LabelType::Header, "Plugin rendering"s));
+      AddItem(std::make_unique<InGameUIItem>(
+                 Settings::m_propPlayer_AncillaryLayering, //
+                 [this]() { return m_player->GetAncillaryLayering(); }, // Live
+                 [this](const bool v)
+                 {
+                    m_player->SetAncillaryLayering(v); // Live: the renderer and the plugins follow, no table reload
+                    RequestRebuild();
+                 }));
+   }
 }
 
 void DisplaySettingsPage::BuildEmbeddedPage()

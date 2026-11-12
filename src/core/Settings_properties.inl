@@ -62,6 +62,9 @@ PropIntDyn(Backglass, BackglassFSWidth, "Width"s, "Fullscreen display mode width
 PropIntDyn(Backglass, BackglassFSHeight, "Height"s, "Fullscreen display mode height"s, 0, 16384, 16384);
 PropFloatDyn(Backglass, BackglassRefreshRate, "Fullscreen Refresh Rate"s, "Fullscreen display mode refresh rate"s, 0.f, 1000.f, 0.f);
 PropIntDyn(Backglass, BackglassColorDepth, "Color Depth"s, "Fullscreen display mode color depth"s, 0, 64, 32);
+// Ancillary window renderer layering: master switch, contextual like the display settings (applied by the Player and
+// the Renderer, shown on the Backglass display page)
+PropBoolDyn(Player, AncillaryLayering, "Transparent Plugin Rendering"s, "Draw the window renderer plugins (backglass, score view, topper) all together, from the least to the most prioritized one of the 'Renderer priority' settings: a plugin which draws with transparency (the B2S Pro plugin with its 'Transparent parts shine through' setting) then lets the plugins below it show through the areas it leaves untouched. Disabled, only the most prioritized plugin claiming a window is drawn, and it covers the whole window.", false);
 PropEnumDyn(Backglass, BackglassRotation, "Rotation"s, "Rotate the rendered content clockwise inside the output, e.g. for screens that are physically mounted rotated without the OS being told about it. Outputs embedded in the playfield window also turn with the playfield"s, int, 0, "0"s, "90"s, "180"s, "270"s);
 // ScoreView Window
 PropEnumDyn(ScoreView, ScoreViewOutput, "Output Mode"s, "Select between disabled, floating, or embedded in another window mode"s, int /* OutputMode */, 0 /* OM_DISABLED */, "Disabled"s,

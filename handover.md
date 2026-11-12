@@ -572,22 +572,26 @@ turned on pays nothing for the feature.
 | In game UI: **Display → Backglass display** page, header *Plugin rendering*, item *Transparent Plugin Rendering* | `src/ui/live/ingameui/DisplaySettingsPage.cpp`, end of `DisplaySettingsPage::BuildWindowPage`, gated on `m_wndId == VPXWindowId::VPXWINDOW_Backglass`. That page is `SaveMode::Both`, so the item gets the page's *save globally / save as table override* buttons |
 | Live values | `Player::m_ancillaryLayering`, `Renderer::m_ancillaryLayering`. **No settings lookup in the render loop**: both cached. The player seeds its copy from the active settings at construction, the renderer in `UpdateSettings` (table load), and `Player::SetAncillaryLayering` is the only writer. The UI item follows the pattern of every item of that page: its *live* value is `Player::GetAncillaryLayering()`, its setter only applies the change live, and the page's **Save** (SaveMode::Both) stores it, globally (resetting the overrides) or as a table override, through the generic `Settings::Set(propId, v, isTableOverride)` API. The modified state is the live value against the stored one, so the save button shows up as soon as you toggle it. An external ini edit is picked up at the next table load |
 | Gate | `Renderer::RenderAncillaryWindow`: `composited = m_ancillaryLayering && any renderer declares isLayeredOverlay`. Off, the winner-takes-all loop runs, byte for byte the shipped behaviour |
-| Pushed to the plugins | `GetAncillaryRendererMsg` gains `int layeringEnabled`, written at each collection with the sentinels `VPXPI_ANCILLARY_LAYERING_ENABLED` / `VPXPI_ANCILLARY_LAYERING_DISABLED` |
-| Plugin side | `B2SRenderer::SetHostLayeringEnabled`; `ShineThrough()` = host master switch **and** our own setting, and it is what the **drawing** tests (canvas backing, padding), so the plugin never leaves areas open when nothing is composited below it |
+| Pushed to the plugins | `VPXRenderContext2D` gains `int isLayered` (**appended** at the end), written by the host at **both** ancillary call sites: 1 in the composited loop, 0 in the winner-takes-all one. It says « this window is composited, the renderers below you are drawn », which is exactly what a renderer needs to know when it draws. An host without the field leaves it at 0 |
+| Plugin side | `ShineThrough()` is our own setting and drives the **declaration** (`isLayeredOverlay`). `TransparencyActive(ctx)` = that setting **and** `ctx->isLayered`, and drives the **drawing** (canvas backing, aspect padding, the dot matrix behind the artwork). The two deliberately differ: we declare a capability, the host decides whether it is used, and we draw for what it decided — so areas are never left open in a window where nothing is drawn below them |
 
-Why the state is pushed to the plugins rather than only checked by the host: with compositing off, the areas a
-transparent renderer leaves untouched show the **window clear** (black), not the renderers below, so a renderer has
-to know and draw its whole window opaquely. The compatibility both ways is by construction: a plugin which does not
-know the field reads a plain `0` (the message is zero initialized), which is not the *enabled* sentinel, and a host
-which does not know the field never writes it, so an 8-field plugin reads stack garbage — in both cases "not
-enabled", which is what an old opaque-only plugin does anyway.
+Why the state is carried **at the render call** rather than at the renderer collection: the render call is where the
+host knows it (the set of renderers claiming the window and their declarations is evaluated there), and it is where
+the plugin draws. With compositing off, the areas a transparent renderer leaves untouched show the **window clear**
+(black), not the renderers below, so the renderer has to know and draw its whole window opaquely. An earlier version
+carried the state in `GetAncillaryRendererMsg::layeringEnabled` with sentinel values; it is gone — the render context
+field replaced it, with no settings transfer, no sentinels and nothing to keep in sync between a collection and a
+frame. Compatibility is by construction: a plugin which does not know `isLayered` never reads it (it draws opaquely,
+as it always did), and a host which does not know it leaves it at 0, which reads as « not composited ».
 
 **Cost when off**: per window and per frame, the walk of the (tiny, already existing) priority list plus a member
 bool read. No settings lookup, no message, no allocation, no extra render state. The UI is one row on an existing
 page.
 
-**Live**: `Player::SetAncillaryLayering` updates the renderer value and re-collects the renderers, which pushes the
-state to the plugins and makes them re-declare. No table reload, no restart.
+**Live**: `Player::SetAncillaryLayering` updates the renderer value and re-collects the renderers, which makes them
+re-declare; the composited state itself reaches a plugin at the next frame, through `ctx->isLayered`. No table reload,
+no restart. A change made by editing the ini by hand is picked up at the next table load (the Player seeds from the
+active settings, the renderer in `UpdateSettings`).
 
 **Why it lives on the Backglass display page**: the first version was a row on the Display *home* page, which is
 `SaveMode::None` (its items are expected to persist themselves, and the page shows **no save button**, `InGameUIPage::Render`
@@ -619,8 +623,8 @@ struct, and every one of them reads as "the feature is off" for a counterpart wh
 
 | Situation | Result |
 |---|---|
-| New host, **old plugin** | The plugin fills the renderer def with a 6 field aggregate initializer: the host reads its `isLayeredOverlay` as 0, so the window is not composited, and the plugin never sees `layeringEnabled` / `isLayered` written |
-| **Old host**, new plugin | `entries` has the old stride, so the plugin never reaches `isLayeredOverlay` (reads 0, declares opaque); the render context leaves `isLayered` at 0 |
+| New host, **old plugin** | The plugin fills the renderer def with a 6 field aggregate initializer: the host reads its `isLayeredOverlay` as 0, so the window is not composited; the plugin never reads `isLayered` and draws opaquely, as it always did |
+| **Old host**, new plugin | `entries` has the old stride, so the plugin never reaches `isLayeredOverlay` (reads 0, declares opaque); the render context leaves `isLayered` at 0, so `TransparencyActive` is false and the plugin paints its whole window |
 | New host, new plugin | Layered rendering with the master switch |
 
 The structs are all in `plugins/plugins/VPXPlugin.h`, the file the plugin SDK is built from: the plugin side compiles

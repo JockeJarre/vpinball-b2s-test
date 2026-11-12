@@ -278,6 +278,10 @@ void Renderer::ApplyTableSettings()
    m_disableAO = m_table->GetSettings().GetPlayer_DisableAO();
    for (int wnd = VPXWindowId::VPXWINDOW_Backglass; wnd <= VPXWindowId::VPXWINDOW_Topper; wnd++)
       m_ancillaryWndRotation[wnd] = 90 * clamp(m_table->GetSettings().GetWindow_Rotation(wnd), 0, 3); // Setting is an index in the 0 / 90 / 180 / 270 literals
+   // Layering master switch of the ancillary window renderers: a contextual setting, applied live through
+   // SetAncillaryLayering, read here so that it is in step with the settings file at table load
+   m_ancillaryLayering = g_settingsService.GetActiveSettings().GetPlayer_AncillaryLayering();
+
    m_vrDesktop = static_cast<VRDesktopMode>(m_table->GetSettings().GetPlayerVR_DesktopDisplay());
    m_vrDesktopShrink = m_table->GetSettings().GetPlayerVR_ShrinkDesktopDisplay();
    m_FXAA = m_table->GetSettings().GetPlayer_FXAA();
@@ -2219,12 +2223,14 @@ void Renderer::RenderAncillaryWindow(VPXWindowId window, const VPX::RenderOutput
    // drawing the renderers which end up covered, which is the price of the feature and why it is declared by
    // the renderers themselves. Since they are drawn in one pass, the content bounds kept are those of the last
    // one drawn, that is of the most prioritized claimer, as in the non composited case.
-   // It is the renderers which decide: a window is composited only when at least one of the renderers claiming it
-   // declares that it draws with alpha and leaves areas untouched. Renderers which all cover their window therefore
-   // keep the shipped single renderer drawing, at no cost. Each renderer is responsible for the consistency of its
-   // own declaration and of what it draws: declaring a layered renderer which then paints everything is only a
-   // waste, while leaving areas open without declaring anything would show the window clear.
-   const bool composited = std::ranges::any_of(ancillaryWndRenderers,
+   // The user has to allow it, and a renderer has to be able to do it: the layering master switch (a live value, so
+   // no settings lookup in the render loop) turns the whole feature off for every renderer at once, and a window is
+   // composited only when at least one of the renderers claiming it declares that it draws with alpha and leaves
+   // areas untouched. Renderers which all cover their window therefore keep the shipped single renderer drawing, at
+   // no cost. Each renderer is told the state it has to draw for (VPXRenderContext2D::isLayered): declaring a
+   // layered renderer which then paints everything is only a waste, while leaving areas open in a window which is
+   // not composited would show the window clear.
+   const bool composited = m_ancillaryLayering && std::ranges::any_of(ancillaryWndRenderers,
       [](const AncillaryRendererDef& renderer) { return renderer.isLayeredOverlay != 0; });
    if (!composited)
    {

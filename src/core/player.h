@@ -286,7 +286,15 @@ public:
    VRDevice *m_vrDevice = nullptr;
    vector<AncillaryRendererDef> m_ancillaryWndRenderers[VPXWindowId::VPXWINDOW_Topper + 1];
    int GetAncillaryRendererPriority(VPXWindowId window, const string& id) const;
+   bool m_ancillaryLayering { false }; // Live value of the layering master switch, see GetAncillaryLayering
    void SetAncillaryRendererPriority(VPXWindowId window, const string& id, int priority);
+
+   // Master switch of the ancillary window renderer layering: off, no window is composited and the plugins are asked
+   // to draw opaquely (nothing shows through them, and the areas a transparent renderer leaves would show the
+   // window clear). Kept as a live value, so the render loop never reads settings, and pushed to the plugins when
+   // they are collected (the 'Player / AncillaryLayering' setting, contextual like the display settings)
+   bool GetAncillaryLayering() const { return m_ancillaryLayering; }
+   void SetAncillaryLayering(bool enabled);
 
    bool IsVR() const { return m_vrDevice != nullptr; }
 

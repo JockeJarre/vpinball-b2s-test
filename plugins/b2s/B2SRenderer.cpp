@@ -55,12 +55,17 @@ static MsgSettingDef shineThroughProp { .propId = "ShineThrough", .name = "Trans
    .isUserEditable = 1, .type = MSGPI_SETTING_TYPE_BOOL, .boolDef = { 0, &shineThroughProp_Get, &shineThroughProp_Set } };
 
 // Whether our own drawing leaves the areas it does not cover untouched: the 'Transparent parts shine through'
-// setting. It is read by the server when the host collects our window renderers (for
-// AncillaryRendererDef::isLayeredOverlay, which is what makes the host composite the window) and by the drawing
-// itself, so what we declare and what we draw are always the same thing: declaring without drawing transparently
-// (or the opposite) would either show the window clear where we leave areas open, or cover renderers we promised
-// to let shine through
+// setting. Read by the server when the host collects our window renderers, for
+// AncillaryRendererDef::isLayeredOverlay, which is what makes the host composite the window
 bool ShineThrough() { return shineThroughProp_Get() != 0; }
+
+// Whether the drawing itself may leave areas untouched, i.e. whether there is anything behind them: the setting
+// above, and the host telling us at the render call (VPXRenderContext2D::isLayered) that the window is composited,
+// so that the renderers below it are drawn as well. Not composited (the host layering master switch off, no other
+// renderer claiming the window), the areas we would leave open show the window clear: the whole window is then
+// painted, as it always was. The declaration (ShineThrough) and the drawing (this) can therefore differ, and must:
+// we declare the capability, the host decides whether it is used, and we draw for what it decided
+bool TransparencyActive(VPXRenderContext2D* ctx) { return ctx != nullptr && ctx->isLayered != 0 && shineThroughProp_Get() != 0; }
 
 static const char* dualModeValues[] = { "Authentic", "Fantasy" };
 MSGPI_ENUM_VAL_SETTING(dualModeProp, "DualMode", "Dual Mode", "Active mode for dual backglasses (authentic or fantasy)", true, 1, 2, dualModeValues, 1);
@@ -332,7 +337,7 @@ void B2SRenderer::FitSurfaceToWindow(VPXRenderContext2D* ctx, const float conten
 // through' the leftover area is left untouched, whatever the window shows there stays visible
 void B2SRenderer::RenderAspectPadding(VPXRenderContext2D* ctx)
 {
-   if (ShineThrough())
+   if (TransparencyActive(ctx))
       return;
    const float left = m_layoutOX;
    const float top = m_layoutOY;
@@ -2162,7 +2167,7 @@ bool B2SRenderer::RenderBackglass(VPXRenderContext2D* ctx, B2SServer* server)
    // B2S Pro: transparent canvas pixels composite over the authored backing color instead of black (reference fB:617-627).
    // The color is stored in a 1x1 texture so it is drawn untinted, exactly as authored. With 'Transparent parts shine
    // through' this underlay is left out, so the transparent pixels of the artwork show what is underneath the view
-   if (m_b2s->m_canvasBacking.has_value() && !ShineThrough())
+   if (m_b2s->m_canvasBacking.has_value() && !TransparencyActive(ctx))
    {
       if (m_canvasBackingTex == nullptr)
       {
@@ -2189,7 +2194,7 @@ bool B2SRenderer::RenderBackglass(VPXRenderContext2D* ctx, B2SServer* server)
    // us (see ArtworkHasOpening), there is nothing to set. It applies where it can be seen through, i.e. when the
    // window is composited (the host display settings switch, ctx->isLayered) and our transparent parts shine
    // through: opaque, the artwork would simply hide the display, so the shipped order (the display on top) is kept
-   const bool dmdBehindArtwork = (ctx->isLayered != 0) && ShineThrough();
+   const bool dmdBehindArtwork = TransparencyActive(ctx);
    if (dmdBehindArtwork)
       RenderDisplays(ctx, server, 0, backImage, true, true);
 

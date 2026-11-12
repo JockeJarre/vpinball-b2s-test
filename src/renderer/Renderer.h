@@ -233,6 +233,11 @@ public:
    bool UseAnisoFiltering() const;
    void SetAnisoFiltering(bool enable);
 
+   // Master switch of the ancillary window renderer layering, applied live (pushed by Player::SetAncillaryLayering,
+   // seeded by UpdateSettings): see RenderAncillaryWindow, AncillaryRendererDef::isLayeredOverlay and
+   // VPXRenderContext2D::isLayered
+   void SetAncillaryLayering(const bool enabled) { m_ancillaryLayering = enabled; }
+
    std::shared_ptr<Sampler> GetBallEnvironment() const { return m_ballEnvSampler; }
 
    class SceneLighting
@@ -422,6 +427,7 @@ private:
    uint64_t m_ancillaryWndLastRenderTime[VPXWindowId::VPXWINDOW_Topper + 1] = {}; // usec() of the last OM_WINDOW render pass (per display refresh rate throttling)
    RenderTarget* m_ancillaryWndLastRT[VPXWindowId::VPXWINDOW_Topper + 1] = {}; // Backbuffer of the last OM_WINDOW render pass; a change (swapchain recreation) forces a render
    int m_ancillaryWndRotation[VPXWindowId::VPXWINDOW_Topper + 1] = {}; // Live rotation of the window content, in clockwise degrees
+   bool m_ancillaryLayering { false }; // Live value of the ancillary window renderer layering master switch, see SetAncillaryLayering
    vec4 m_ancillaryContentBounds[VPXWindowId::VPXWINDOW_Topper + 1] = {}; // See GetAncillaryContentBounds
    struct AncillaryRenderSetup
    {
