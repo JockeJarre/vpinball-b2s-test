@@ -61,6 +61,9 @@
     <Filter Include="ui\live\editor\parts">
       <UniqueIdentifier>{D3F3319B-4D8E-43F3-95BA-EA27C3FC0967}</UniqueIdentifier>
     </Filter>
+    <Filter Include="ui\live\editor\ops">
+      <UniqueIdentifier>{7B4E9A21-3C5D-4E8F-A6B2-9D1F0C5E7A83}</UniqueIdentifier>
+    </Filter>
     <Filter Include="ui\live\ingame">
       <UniqueIdentifier>{6DF89AE6-299E-4F7E-A729-9188AD1D98F1}</UniqueIdentifier>
     </Filter>
@@ -111,9 +114,6 @@
     </Filter>
     <Filter Include="third-party\bc6h">
       <UniqueIdentifier>{0c7c3345-9146-4bfa-8210-8cb93c7d43f0}</UniqueIdentifier>
-    </Filter>
-    <Filter Include="third-party\bc7e">
-      <UniqueIdentifier>{55c5b039-5f27-4002-809b-850a2ebf2b74}</UniqueIdentifier>
     </Filter>
     <Filter Include="third-party\bc7f">
       <UniqueIdentifier>{9d24fe6f-c41f-42aa-af23-e215aa2e5373}</UniqueIdentifier>
@@ -525,6 +525,9 @@
     <ClCompile Include="$(SolutionDir)/../../src/ui/live/EditorUI.cpp">
       <Filter>ui\live\editor</Filter>
     </ClCompile>
+    <ClCompile Include="$(SolutionDir)/../../src/ui/live/FileDialog.cpp">
+      <Filter>ui\live\editor</Filter>
+    </ClCompile>
     <ClCompile Include="$(SolutionDir)/../../src/ui/live/editor/PropertyPane.cpp">
       <Filter>ui\live\editor</Filter>
     </ClCompile>
@@ -576,6 +579,9 @@
     <ClCompile Include="$(SolutionDir)/../../src/ui/live/editor/parts/KickerUIPart.cpp">
       <Filter>ui\live\editor\parts</Filter>
     </ClCompile>
+    <ClCompile Include="$(SolutionDir)/../../src/ui/live/editor/ops/LayerSpaceChangeOp.cpp">
+      <Filter>ui\live\editor\ops</Filter>
+    </ClCompile>
     <ClCompile Include="$(SolutionDir)/../../src/ui/live/editor/parts/LightUIPart.cpp">
       <Filter>ui\live\editor\parts</Filter>
     </ClCompile>
@@ -606,6 +612,12 @@
     <ClCompile Include="$(SolutionDir)/../../src/ui/live/editor/parts/RampUIPart.cpp">
       <Filter>ui\live\editor\parts</Filter>
     </ClCompile>
+    <ClCompile Include="$(SolutionDir)/../../src/ui/live/editor/ops/ReferenceImageMath.cpp">
+      <Filter>ui\live\editor\ops</Filter>
+    </ClCompile>
+    <ClCompile Include="$(SolutionDir)/../../src/ui/live/editor/ops/ReferenceImageOp.cpp">
+      <Filter>ui\live\editor\ops</Filter>
+    </ClCompile>
     <ClCompile Include="$(SolutionDir)/../../src/ui/live/editor/RendererInspectionModal.cpp">
       <Filter>ui\live\editor</Filter>
     </ClCompile>
@@ -617,6 +629,9 @@
     </ClCompile>
     <ClCompile Include="$(SolutionDir)/../../src/ui/live/editor/ScriptPanel.cpp">
       <Filter>ui\live\editor</Filter>
+    </ClCompile>
+    <ClCompile Include="$(SolutionDir)/../../src/ui/live/editor/ops/SetOriginOp.cpp">
+      <Filter>ui\live\editor\ops</Filter>
     </ClCompile>
     <ClCompile Include="$(SolutionDir)/../../src/ui/live/editor/parts/SpinnerUIPart.cpp">
       <Filter>ui\live\editor\parts</Filter>
@@ -634,6 +649,9 @@
       <Filter>ui\live\editor\parts</Filter>
     </ClCompile>
     <ClCompile Include="$(SolutionDir)/../../src/ui/live/editor/ViewportPane.cpp">
+      <Filter>ui\live\editor</Filter>
+    </ClCompile>
+    <ClCompile Include="$(SolutionDir)/../../src/ui/live/editor/ViewportSidebar.cpp">
       <Filter>ui\live\editor</Filter>
     </ClCompile>
     <ClCompile Include="$(SolutionDir)/../../src/ui/live/ingameui/InGameUI.cpp">
@@ -1089,9 +1107,6 @@
     <ClCompile Include="$(SolutionDir)/../../src/utils/objloader.cpp">
       <Filter>utils</Filter>
     </ClCompile>
-    <ClCompile Include="$(SolutionDir)/../../third-party/include/hidapi/windows/hid.cpp">
-      <Filter>third-party</Filter>
-    </ClCompile>
     <ClCompile Include="$(SolutionDir)/../../third-party/include/hid-report-parser/hid_report_parser.cpp">
       <Filter>third-party</Filter>
     </ClCompile>
@@ -1121,9 +1136,6 @@
     </ClCompile>
     <ClCompile Include="$(SolutionDir)/../../third-party/include/bc6h/basisu_bc6h.cpp">
       <Filter>third-party\bc6h</Filter>
-    </ClCompile>
-    <ClCompile Include="$(SolutionDir)/../../third-party/include/bc7e/basisu_bc7e_scalar.cpp">
-      <Filter>third-party\bc7e</Filter>
     </ClCompile>
     <ClCompile Include="$(SolutionDir)/../../third-party/include/bc7f/basisu_bc7f.cpp">
       <Filter>third-party\bc7f</Filter>
@@ -1649,6 +1661,9 @@
     <ClInclude Include="$(SolutionDir)/../../src/ui/live/LiveUI.h">
       <Filter>ui\live</Filter>
     </ClInclude>
+    <ClInclude Include="$(SolutionDir)/../../src/ui/live/ImGuiHelpers.h">
+      <Filter>ui\live</Filter>
+    </ClInclude>
     <ClInclude Include="$(SolutionDir)/../../src/ui/live/PerfUI.h">
       <Filter>ui\live</Filter>
     </ClInclude>
@@ -1659,6 +1674,9 @@
       <Filter>ui\live</Filter>
     </ClInclude>
     <ClInclude Include="$(SolutionDir)/../../src/ui/live/EditorUI.h">
+      <Filter>ui\live\editor</Filter>
+    </ClInclude>
+    <ClInclude Include="$(SolutionDir)/../../src/ui/live/FileDialog.h">
       <Filter>ui\live\editor</Filter>
     </ClInclude>
     <ClInclude Include="$(SolutionDir)/../../src/ui/live/editor/parts/EditorUIPart.h">
@@ -1712,8 +1730,8 @@
     <ClInclude Include="$(SolutionDir)/../../src/ui/live/editor/parts/HitTargetUIPart.h">
       <Filter>ui\live\editor\parts</Filter>
     </ClInclude>
-    <ClInclude Include="$(SolutionDir)/../../src/ui/live/editor/IconsLucide.h">
-      <Filter>ui\live\editor</Filter>
+    <ClInclude Include="$(SolutionDir)/../../src/ui/live/IconsLucide.h">
+      <Filter>ui\live</Filter>
     </ClInclude>
     <ClInclude Include="$(SolutionDir)/../../src/ui/live/editor/parts/KickerUIPart.h">
       <Filter>ui\live\editor\parts</Filter>
@@ -1724,11 +1742,14 @@
     <ClInclude Include="$(SolutionDir)/../../src/ui/live/editor/parts/LightSeqUIPart.h">
       <Filter>ui\live\editor\parts</Filter>
     </ClInclude>
-    <ClInclude Include="$(SolutionDir)/../../src/ui/live/editor/LucideFont.h">
-      <Filter>ui\live\editor</Filter>
+    <ClInclude Include="$(SolutionDir)/../../src/ui/live/LucideFont.h">
+      <Filter>ui\live</Filter>
     </ClInclude>
     <ClInclude Include="$(SolutionDir)/../../src/ui/live/editor/LiveRenderContext.h">
       <Filter>ui\live\editor</Filter>
+    </ClInclude>
+    <ClInclude Include="$(SolutionDir)/../../src/ui/live/editor/ops/LayerSpaceChangeOp.h">
+      <Filter>ui\live\editor\ops</Filter>
     </ClInclude>
     <ClInclude Include="$(SolutionDir)/../../src/ui/live/editor/OutlinerPanel.h">
       <Filter>ui\live\editor</Filter>
@@ -1751,6 +1772,12 @@
     <ClInclude Include="$(SolutionDir)/../../src/ui/live/editor/parts/RampUIPart.h">
       <Filter>ui\live\editor\parts</Filter>
     </ClInclude>
+    <ClInclude Include="$(SolutionDir)/../../src/ui/live/editor/ops/ReferenceImageMath.h">
+      <Filter>ui\live\editor\ops</Filter>
+    </ClInclude>
+    <ClInclude Include="$(SolutionDir)/../../src/ui/live/editor/ops/ReferenceImageOp.h">
+      <Filter>ui\live\editor\ops</Filter>
+    </ClInclude>
     <ClInclude Include="$(SolutionDir)/../../src/ui/live/editor/RendererInspectionModal.h">
       <Filter>ui\live\editor</Filter>
     </ClInclude>
@@ -1765,6 +1792,9 @@
     </ClInclude>
     <ClInclude Include="$(SolutionDir)/../../src/ui/live/editor/Selection.h">
       <Filter>ui\live\editor</Filter>
+    </ClInclude>
+    <ClInclude Include="$(SolutionDir)/../../src/ui/live/editor/ops/SetOriginOp.h">
+      <Filter>ui\live\editor\ops</Filter>
     </ClInclude>
     <ClInclude Include="$(SolutionDir)/../../src/ui/live/editor/parts/SpinnerUIPart.h">
       <Filter>ui\live\editor\parts</Filter>
@@ -1782,6 +1812,9 @@
       <Filter>ui\live\editor\parts</Filter>
     </ClInclude>
     <ClInclude Include="$(SolutionDir)/../../src/ui/live/editor/ViewportPane.h">
+      <Filter>ui\live\editor</Filter>
+    </ClInclude>
+    <ClInclude Include="$(SolutionDir)/../../src/ui/live/editor/ViewportSidebar.h">
       <Filter>ui\live\editor</Filter>
     </ClInclude>
     <ClInclude Include="$(SolutionDir)/../../src/ui/live/ingameui/InGameUI.h">
@@ -2261,9 +2294,6 @@
     <ClInclude Include="$(SolutionDir)/../../third-party/include/stb_image.h">
       <Filter>third-party</Filter>
     </ClInclude>
-    <ClInclude Include="$(SolutionDir)/../../third-party/include/hidapi/hidapi.h">
-      <Filter>third-party\hid</Filter>
-    </ClInclude>
     <ClInclude Include="$(SolutionDir)/../../third-party/include/hid-report-parser/hid_report_parser.h">
       <Filter>third-party\hid</Filter>
     </ClInclude>
@@ -2459,20 +2489,8 @@
     <ClInclude Include="$(SolutionDir)/../../third-party/include/win32xx/include/wxx_wincore0.h">
       <Filter>third-party\Win32xx</Filter>
     </ClInclude>
-    <ClInclude Include="$(SolutionDir)/../../third-party/include/winsdk/hidpi.h">
-      <Filter>third-party\hid</Filter>
-    </ClInclude>
-    <ClInclude Include="$(SolutionDir)/../../third-party/include/winsdk/hidsdi.h">
-      <Filter>third-party\hid</Filter>
-    </ClInclude>
-    <ClInclude Include="$(SolutionDir)/../../third-party/include/winsdk/hidusage.h">
-      <Filter>third-party\hid</Filter>
-    </ClInclude>
     <ClInclude Include="$(SolutionDir)/../../third-party/include/bc6h/basisu_bc6h.h">
       <Filter>third-party\bc6h</Filter>
-    </ClInclude>
-    <ClInclude Include="$(SolutionDir)/../../third-party/include/bc7e/basisu_bc7e_scalar.h">
-      <Filter>third-party\bc7e</Filter>
     </ClInclude>
     <ClInclude Include="$(SolutionDir)/../../third-party/include/bc7f/basisu_bc7f.h">
       <Filter>third-party\bc7f</Filter>
@@ -2708,6 +2726,9 @@
     <ClInclude Include="$(SolutionDir)/../../src/input/InputManager.h">
       <Filter>input</Filter>
     </ClInclude>
+    <ClInclude Include="$(SolutionDir)/../../src/input/HIDEnumeration.h">
+      <Filter>input</Filter>
+    </ClInclude>
     <ClInclude Include="$(SolutionDir)/../../src/input/OpenPinDevHandler.h">
       <Filter>input</Filter>
     </ClInclude>
@@ -2821,6 +2842,9 @@
       <Filter>assets\editor</Filter>
     </Image>
     <Image Include="$(SolutionDir)/../../src/assets/editor/reel.png">
+      <Filter>assets\editor</Filter>
+    </Image>
+    <Image Include="$(SolutionDir)/../../src/assets/editor/refimage.png">
       <Filter>assets\editor</Filter>
     </Image>
     <Image Include="$(SolutionDir)/../../src/assets/editor/rubber.png">
@@ -3527,6 +3551,9 @@
       <Filter>shaders\bgfx</Filter>
     </None>
     <None Include="$(SolutionDir)/../../src/shaders/bgfx/vs_ball.sc">
+      <Filter>shaders\bgfx</Filter>
+    </None>
+    <None Include="$(SolutionDir)/../../src/shaders/bgfx/vs_ball_raycast.sc">
       <Filter>shaders\bgfx</Filter>
     </None>
     <None Include="$(SolutionDir)/../../src/shaders/bgfx/vs_ball_trail.sc">

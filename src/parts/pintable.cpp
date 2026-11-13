@@ -42,6 +42,7 @@
 #include "tinyxml2/tinyxml2.h"
 #include "ui/VPXFileFeedback.h"
 #include "ui/live/LiveUI.h"
+#include "ui/live/editor/ops/ReferenceImageOp.h"
 #include "utils/BiffReader.h"
 #include "utils/BiffWriter.h"
 #include "utils/hash.h"
@@ -560,6 +561,7 @@ PinTable* PinTable::CopyForPlay() const
    dst->m_right = src->m_right;
    dst->m_bottom = src->m_bottom;
    dst->m_overridePhysics = src->m_overridePhysics;
+   dst->m_physicProfile = src->m_physicProfile;
    dst->m_overridePhysicsFlipper = src->m_overridePhysicsFlipper;
    dst->m_Gravity = src->m_Gravity;
    dst->m_friction = src->m_friction;
@@ -754,6 +756,7 @@ HRESULT PinTable::Save(VPXFileFeedback &feedback)
       m_settings.Save();
       return hr;
    }
+
    // Tables are saved in the VPX format, so a legacy .vpt table is saved to a .vpx file, and any other name gets the .vpx extension appended,
    // keeping a dotted name like 'table 1.5' whole (keeping the case of an existing .vpx extension, as changing it would write another file
    // on case sensitive file systems)
@@ -1126,14 +1129,21 @@ std::filesystem::path PinTable::GetCompanionFileName(const string &extension, co
 // for its file layout). Only the 'VPX' section is modified, all the other fields belong to frontends
 static void UpdateTableInfoFile(const PinTable *const table, const std::function<void(nlohmann::ordered_json &)> &update)
 {
-   const std::filesystem::path infoPath = table->GetInfoFileName();
-   if (infoPath.empty())
+   const std::filesystem::path infoPath = table->GetCompanionFileName(".info"s);
+   if (!FileExists(infoPath))
       return;
 
-   // The file belongs to frontends: if it exists but can not be read or parsed, it is left untouched
+   // The file belongs to frontends: it is only updated, never created, and left untouched if it can not be read or parsed
    nlohmann::ordered_json doc = nlohmann::ordered_json::object();
    std::error_code ec;
-   if (std::filesystem::exists(infoPath, ec) && std::filesystem::file_size(infoPath, ec) > 0)
+   if (!std::filesystem::exists(infoPath, ec))
+   {
+      // The file was removed since GetInfoFileName located it: leave it be
+      if (ec)
+         PLOGE << "Failed to access table info file " << infoPath << " (" << ec.message() << "), leaving it unmodified";
+      return;
+   }
+   if (std::filesystem::file_size(infoPath, ec) > 0)
    {
       try
       {
@@ -1279,6 +1289,7 @@ void PinTable::Save(IObjectWriter& writer, const bool saveForUndo)
    }
 
    writer.WriteInt(FID(ORRP), m_overridePhysics);
+   writer.WriteInt(FID(PHPR), (int)m_physicProfile);
    writer.WriteBool(FID(ORPF), m_overridePhysicsFlipper);
    writer.WriteFloat(FID(GAVT), m_Gravity);
    writer.WriteFloat(FID(FRCT), m_friction);
@@ -2368,16 +2379,6 @@ static std::filesystem::path PackSidecarDataFile(const std::filesystem::path &si
    return {};
 }
 
-// Formats a 16 byte MD5 hash as a hex string
-static string HexMD5(const uint8_t *const hash)
-{
-   char hex[33];
-   for (int i = 0; i < 16; ++i)
-      snprintf(hex + 2 * i, 3, "%02x", hash[i]);
-   hex[32] = '\0';
-   return hex;
-}
-
 // Tracks the file names already written to a pack, to resolve collisions including on case insensitive filesystems
 struct PackFilePool
 {
@@ -2476,7 +2477,6 @@ static void WritePackImage(JSONSerializer::Serializer &pack, PackFilePool &pool,
    sidecar["width"] = tex->m_width.load();
    sidecar["height"] = tex->m_height.load();
    sidecar["alpha_test"] = tex->m_alphaTestValue * 255.f; // 0..255 scale, negative when disabled
-   sidecar["md5"] = HexMD5(tex->GetMD5Hash());
    sidecar["opaque"] = tex->IsOpaque();
    pack.AddTextFile(std::filesystem::path("images") / (stem + ".json"s), sidecar.dump(2));
 }
@@ -2654,7 +2654,9 @@ HRESULT PinTable::LoadGameFromJSONPack(JSONSerializer::Deserializer &packRef, VP
             const string name = item.get<string>();
             const std::filesystem::path file = folder / (JSONSerializer::SanitizeFileName(name) + ".json"s);
             if (!pack->Exists(file))
+            {
                PLOGW << "No file found for " << folder << " entry \"" << name << '"';
+            }
             else if (std::ranges::find(claimed, file) == claimed.end())
             {
                items.emplace_back(file, name);
@@ -2867,31 +2869,6 @@ HRESULT PinTable::LoadGameFromJSONPack(JSONSerializer::Deserializer &packRef, VP
          for (const char *key : { "alpha_test", "opaque", "link" })
             if (sidecar.contains(key))
                texDoc[key] = sidecar[key];
-         if (const nlohmann::json md5 = sidecar.value("md5", nlohmann::json()); md5.is_string())
-         {
-            // The md5 hash is stored as a hex string, converted back to its byte array
-            const string hex = md5.get<string>();
-            const auto hexDigit = [](const char c)
-            {
-               if (c >= '0' && c <= '9')
-                  return c - '0';
-               if (c >= 'a' && c <= 'f')
-                  return c - 'a' + 10;
-               if (c >= 'A' && c <= 'F')
-                  return c - 'A' + 10;
-               return -1;
-            };
-            nlohmann::ordered_json bytes = nlohmann::ordered_json::array();
-            for (size_t i = 0; i + 1 < hex.size(); i += 2)
-            {
-               const int hi = hexDigit(hex[i]);
-               const int lo = hexDigit(hex[i + 1]);
-               if (hi < 0 || lo < 0)
-                  break;
-               bytes.push_back((hi << 4) | lo);
-            }
-            texDoc["md5"] = bytes;
-         }
          // Image data block, using the PinBinary serialization field ordering (size before data)
          nlohmann::ordered_json binDoc;
          binDoc["name"] = name;
@@ -2918,7 +2895,9 @@ HRESULT PinTable::LoadGameFromJSONPack(JSONSerializer::Deserializer &packRef, VP
             const nlohmann::json sidecar = pack->ReadTextFile(entry, sidecarContent) ? nlohmann::json::parse(sidecarContent) : nlohmann::json::object();
             const std::filesystem::path dataFile = PackSidecarDataFile(entry, imageEntries);
             if (dataFile.empty())
+            {
                PLOGE << "Missing data file for image sidecar \"" << PathToUTF8(entry) << '"';
+            }
             else
                loadImage(sidecar, dataFile, PathToUTF8(entry.stem()));
          }
@@ -2969,7 +2948,9 @@ HRESULT PinTable::LoadGameFromJSONPack(JSONSerializer::Deserializer &packRef, VP
             const nlohmann::json sidecar = pack->ReadTextFile(entry, sidecarContent) ? nlohmann::json::parse(sidecarContent) : nlohmann::json::object();
             const std::filesystem::path dataFile = PackSidecarDataFile(entry, soundEntries);
             if (dataFile.empty())
+            {
                PLOGE << "Missing data file for sound sidecar \"" << PathToUTF8(entry) << '"';
+            }
             else
                loadSound(sidecar, dataFile, PathToUTF8(entry.stem()));
          }
@@ -3017,7 +2998,9 @@ HRESULT PinTable::LoadGameFromJSONPack(JSONSerializer::Deserializer &packRef, VP
             const nlohmann::json sidecar = pack->ReadTextFile(entry, sidecarContent) ? nlohmann::json::parse(sidecarContent) : nlohmann::json::object();
             const std::filesystem::path dataFile = PackSidecarDataFile(entry, fontEntries);
             if (dataFile.empty())
+            {
                PLOGE << "Missing data file for font sidecar \"" << PathToUTF8(entry) << '"';
+            }
             else
                loadFont(sidecar, dataFile, PathToUTF8(entry.stem()));
          }
@@ -3638,14 +3621,8 @@ std::unique_ptr<JSONSerializer::Deserializer> PinTable::CreateImportDeserializer
          if (tex == nullptr)
             continue;
          const nlohmann::json sidecar = readJSON(sidecarFile);
-         bool equal = sidecar.is_object();
-         if (equal)
-         {
-            if (const nlohmann::json md5 = sidecar.value("md5", nlohmann::json()); md5.is_string())
-               equal = StrCompareNoCase(md5.get<string>(), HexMD5(tex->GetMD5Hash()));
-            else
-               equal = sameData(sidecarFile, tex->GetFileRaw(), tex->GetFileSize());
-         }
+         // Compares the data itself (older packs' 'md5' is ignored: it may be stale after an edit of the image file)
+         bool equal = sidecar.is_object() && sameData(sidecarFile, tex->GetFileRaw(), tex->GetFileSize());
          if (equal)
             if (const nlohmann::json v = sidecar.value("alpha_test", nlohmann::json()); !v.is_number() || fabsf(v.get<float>() - tex->m_alphaTestValue * 255.f) > 0.5f)
                equal = false;
@@ -3801,6 +3778,7 @@ void PinTable::SetLoadDefaults()
 
    m_BallDecalMode = false;
 
+   m_physicProfile = PhysicProfile::V10_8; // pre-10.9 tables run the physics they were tuned for
    m_overridePhysicsFlipper = false;
 }
 
@@ -3873,6 +3851,12 @@ void PinTable::Load(IObjectReader& reader)
          }
          //case FID(VERS): szVersion = reader.AsString(); break;
          case FID(ORRP): m_overridePhysics = reader.AsInt(); break;
+         case FID(PHPR):
+         {
+            const int profile = reader.AsInt();
+            m_physicProfile = (profile >= (int)PhysicProfile::V10_8 && profile <= (int)PhysicProfile::V10_9) ? (PhysicProfile)profile : PhysicProfile::V10_8;
+            break;
+         }
          case FID(ORPF): m_overridePhysicsFlipper = reader.AsBool(); break;
          case FID(GAVT): m_Gravity = reader.AsFloat(); break;
          case FID(FRCT): m_friction = reader.AsFloat(); break;
@@ -5061,26 +5045,87 @@ Texture *PinTable::ImportImage(const std::filesystem::path &filename, const stri
       image->m_name = imagename;
 
    if (existing)
+      return ReImportImage(existing, image);
+
+   m_vimage.push_back(image);
+   // GetImage looks images up in the texture map once it is set up (play, live editor): keep it in sync so that the parts can use the image right
+   // away. An image added under a name already used keeps the existing entry.
+   if ((m_liveBaseTable || !m_textureMap.empty()) && m_textureMap.find(image->m_name) == m_textureMap.end())
+      m_textureMap[image->m_name] = image;
+   if (m_liveBaseTable)
+      m_vliveimage.push_back(image);
+   return image;
+}
+
+Texture *PinTable::ImportImage(Texture *const image)
+{
+   // A file identical to an image the table already holds is not imported again: the existing image is used instead
+   if (Texture *const dup = FindImageByContent(image))
    {
-      RemoveFromVectorSingle(m_vimage, existing);
-      if (m_liveBaseTable)
-         RemoveFromVectorSingle(m_vliveimage, existing);
-      image->m_alphaTestValue = existing->m_alphaTestValue;
-      delete existing;
+      delete image;
+      return dup;
    }
 
    m_vimage.push_back(image);
-   if (m_liveBaseTable)
-   {
+   // GetImage looks images up in the texture map once it is set up (play, live editor): keep it in sync so that the parts can use the image right
+   // away. An image added under a name already used keeps the existing entry.
+   if ((m_liveBaseTable || !m_textureMap.empty()) && m_textureMap.find(image->m_name) == m_textureMap.end())
       m_textureMap[image->m_name] = image;
+   if (m_liveBaseTable)
       m_vliveimage.push_back(image);
-   }
    return image;
+}
+
+Texture *PinTable::ReImportImage(Texture *const oldImage, Texture *const image)
+{
+   if (image->HasSameContent(*oldImage))
+   {
+      // The content is unchanged: keep the existing image
+      delete image;
+      return oldImage;
+   }
+
+   image->m_alphaTestValue = oldImage->m_alphaTestValue;
+   RemoveFromVectorSingle(m_vimage, oldImage);
+   if (m_liveBaseTable)
+      RemoveFromVectorSingle(m_vliveimage, oldImage);
+   // As in RemoveImage: a running player would keep the old image's texture data, with a dangling pointer to it
+   if (g_pplayer && g_pplayer->m_renderer)
+      g_pplayer->m_renderer->m_renderDevice->m_texMan.UnloadTexture(oldImage);
+   delete oldImage;
+
+   m_vimage.push_back(image);
+   // GetImage looks images up in the texture map once it is set up (play, live editor): a reimported image takes over the lookup entry
+   if (m_liveBaseTable || !m_textureMap.empty())
+      m_textureMap[image->m_name] = image;
+   if (m_liveBaseTable)
+      m_vliveimage.push_back(image);
+   return image;
+}
+
+Texture *PinTable::FindImageByContent(const Texture *const image) const
+{
+   const auto it = std::ranges::find_if(m_vimage, [image](const Texture *other) { return other != image && other->HasSameContent(*image); });
+   return it != m_vimage.end() ? *it : nullptr;
 }
 
 void PinTable::RemoveImage(Texture * const ppi)
 {
    RemoveFromVectorSingle(m_vimage, ppi);
+
+   // The lookup table must not keep pointing at the deleted image: drop its entry, or hand it to another image of the same name
+   if (const auto it = m_textureMap.find(ppi->m_name); it != m_textureMap.end() && it->second == ppi)
+   {
+      const auto other = std::ranges::find_if(m_vimage, [ppi](const Texture *image) { return StrCompareNoCase(image->m_name, ppi->m_name); });
+      if (other != m_vimage.end())
+         it->second = *other;
+      else
+         m_textureMap.erase(it);
+   }
+
+   // A running player (live editor) would keep the image's texture data, with a dangling pointer to it
+   if (g_pplayer && g_pplayer->m_renderer)
+      g_pplayer->m_renderer->m_renderDevice->m_texMan.UnloadTexture(ppi);
 
    delete ppi;
 }
@@ -7385,6 +7430,43 @@ void PinTable::ShowWhereImageUsed(vector<WhereUsedInfo> &vWhereUsed, Texture *co
          insertUser("Ball Decal"s);
       if (StrCompareNoCase(m_envImage, searchObjectName))
          insertUser("Environment Image"s);
+   }
+}
+
+void PinTable::CollectPlayImages(ankerl::unordered_dense::set<const Texture *> &shown) const
+{
+   const auto add = [this, &shown](const string &name)
+   {
+      if (const Texture *const image = GetImage(name); image != nullptr)
+         shown.insert(image);
+   };
+   // Not the environment image: the renderer decodes it itself (for its sampler and the radiance precomputation)
+   for (const string *name : { &m_image, &m_ballImage, &m_ballImageDecal, &m_imageColorGrade })
+      add(*name);
+   for (const string &name : m_BG_image)
+      add(name);
+   for (const IEditable *const part : m_vedit)
+   {
+      if (part == nullptr || (part->GetPartGroup() != nullptr && part->GetPartGroup()->GetPlayerModeVisibilityMask() == 0)
+         || VPX::EditorUI::ReferenceImageOp::IsReferenceImage(part)) // At table load, m_d holds the authored visibility
+         continue;
+      switch (part->GetItemType())
+      {
+      case eItemBall: add(static_cast<const Ball *>(part)->m_d.m_szImage); add(static_cast<const Ball *>(part)->m_d.m_imageDecal); break;
+      case eItemDecal: add(static_cast<const Decal *>(part)->m_d.m_szImage); break;
+      case eItemDispReel: add(static_cast<const DispReel *>(part)->m_d.m_szImage); break;
+      case eItemFlasher: add(static_cast<const Flasher *>(part)->m_d.m_szImageA); add(static_cast<const Flasher *>(part)->m_d.m_szImageB); break;
+      case eItemFlipper: add(static_cast<const Flipper *>(part)->m_d.m_szImage); break;
+      case eItemHitTarget: add(static_cast<const HitTarget *>(part)->m_d.m_szImage); break;
+      case eItemLight: add(static_cast<const Light *>(part)->m_d.m_szImage); break;
+      case eItemPlunger: add(static_cast<const Plunger *>(part)->m_d.m_szImage); break;
+      case eItemPrimitive: add(static_cast<const Primitive *>(part)->m_d.m_szImage); add(static_cast<const Primitive *>(part)->m_d.m_szNormalMap); break;
+      case eItemRamp: add(static_cast<const Ramp *>(part)->m_d.m_szImage); break;
+      case eItemRubber: add(static_cast<const Rubber *>(part)->m_d.m_szImage); break;
+      case eItemSpinner: add(static_cast<const Spinner *>(part)->m_d.m_szImage); break;
+      case eItemSurface: add(static_cast<const Surface *>(part)->m_d.m_szImage); add(static_cast<const Surface *>(part)->m_d.m_szSideImage); break;
+      default: break;
+      }
    }
 }
 

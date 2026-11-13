@@ -270,6 +270,9 @@ PropBool(PlayerVR, SpatialAudioPlayfield, "Playfield Spatial Audio"s,
    "Render playfield sounds as spatially positioned sources, binauralized for the VR headset, instead of the legacy static pan/fade channel mixing"s, true);
 PropFloatDyn(PlayerVR, ControllerCabYOffset, "Cabinet Y Offset"s, "Y offset to apply when using controller view centering"s, -150.f, 50.f, 0.f);
 PropFloatDyn(PlayerVR, ControllerCabZOffset, "Cabinet Z Offset"s, "Z offset to apply when using controller view centering"s, -50.f, 50.f, 0.f);
+PropFloatDyn(PlayerVR, ControllerCabWidthOffset, "Cabinet Width Offset"s,
+   "Width offset added to the distance between the controllers to define the lockbar width when using controller view centering (only applies when a custom lockbar width is defined)"s,
+   -50.f, 50.f, 0.f);
 PropFloatUnbounded(PlayerVR, ResFactor, "ResFactor"s, ""s, -1.f);
 PropBool(PlayerVR, OverrideLockbarWidth, "Custom Lockbar Width"s,
    "Scale the virtual cabinet so that its lockbar matches the user defined lockbar width. If disabled, the cabinet is rendered at its native (table defined) size."s, true);
@@ -1395,6 +1398,31 @@ PropIntUnbounded(Editor, WindowTop, "WindowTop"s, "Main window top"s, -1);
 PropIntUnbounded(Editor, WindowRight, "WindowRight"s, "Main window right"s, -1);
 PropIntUnbounded(Editor, WindowBottom, "WindowBottom"s, "Main window bottom"s, -1);
 PropBool(Editor, WindowMaximized, "WindowMaximized"s, "Main window maximized"s, false);
+// Live editor navigation preferences
+#ifdef __APPLE__
+#define VPX_NAV_ALT_DEFAULT true
+#else
+#define VPX_NAV_ALT_DEFAULT false
+#endif
+PropBool(Editor, NavOrbitSelection, "Orbit Around Selection"s, "Orbit and zoom around the selected parts instead of the view center"s, true);
+PropBool(Editor, NavZoomToMouse, "Zoom To Mouse Position"s, "Mouse wheel zooms toward the cursor instead of the view center"s, true);
+PropBool(Editor, NavInvertZoom, "Invert Zoom"s, "Invert the direction of the mouse wheel zoom"s, false);
+PropFloat(Editor, NavOrbitSensitivity, "Orbit Sensitivity"s, "Speed of the camera orbit when dragging"s, 0.1f, 5.f, 1.f);
+PropFloat(Editor, NavFovY, "Field Of View"s, "Vertical field of view of the editor perspective camera, in degrees (39.6 is a 50 mm lens on a 24 mm sensor)"s, 15.f, 100.f, 39.6f);
+PropInt(Editor, NavSelectionDisplay, "Selection Display"s, "How selected parts are shown: 0 = edges only (surface shading untouched), 1 = edges and tint, 2 = not shown"s, 0, 2, 0);
+PropBool(Editor, NavAutoDepth, "Auto Depth"s, "With nothing selected, orbit around the 3D point under the cursor when the drag starts"s, true);
+PropBool(Editor, NavAltMiddleButton, "Alt Acts As Middle Button"s, "Alt + left drag orbits / pans like the middle button (for trackpads and mice without a middle button)"s, VPX_NAV_ALT_DEFAULT);
+PropBool(Editor, NavTrackpad, "Trackpad Scrolling"s, "Two finger scroll pans the view, Ctrl / Cmd + scroll zooms (instead of scroll zooming)"s, VPX_NAV_ALT_DEFAULT);
+PropBool(Editor, NavEmulateNumpad, "Emulate Numpad"s, "Top row digits act as the numpad view keys (1 front, 3 side, 7 top, 5 perspective/orthographic, 2/4/6/8 orbit step); edit mode only, while the table is not playing"s, VPX_NAV_ALT_DEFAULT);
+PropBool(Editor, NavBlenderTransform, "Blender Transform Keys"s, "G / R / S start a Blender style modal transform driven by the mouse instead of showing the gizmo"s, true);
+PropBool(Editor, SnapEnabled, "Snapping"s, "Snap gizmo and G / R / S transforms to the increments below (Ctrl inverts the snapping while transforming)"s, false);
+PropInt(Editor, SnapTarget, "Snap Target"s, "0 = increment (grid), 1 = points (drag points and centers of other parts, G only)"s, 0, 1, 0);
+PropFloat(Editor, SnapMove, "Snap Move Increment"s, "Move snapping increment, in VP units"s, 0.01f, 1000.f, 10.f);
+PropFloat(Editor, SnapRotate, "Snap Rotate Increment"s, "Rotation snapping increment, in degrees"s, 0.1f, 180.f, 15.f);
+PropFloat(Editor, SnapScale, "Snap Scale Increment"s, "Scale snapping increment (scale factor)"s, 0.001f, 10.f, 0.1f);
+PropBool(Editor, SnapAffectMove, "Snap Moves"s, "Snapping applies to moves"s, true);
+PropBool(Editor, SnapAffectRotate, "Snap Rotations"s, "Snapping applies to rotations"s, true);
+PropBool(Editor, SnapAffectScale, "Snap Scales"s, "Snapping applies to scales"s, true);
 PropIntUnbounded(Editor, ImageMngPosX, "ImageMngPosX"s, "Image Manager window X position"s, 0);
 PropIntUnbounded(Editor, ImageMngPosY, "ImageMngPosY"s, "Image Manager window Y position"s, 0);
 PropIntUnbounded(Editor, ImageMngWidth, "ImageMngWidth"s, "Image Manager window width"s, 1000);
@@ -1457,6 +1485,7 @@ PropString(LiveEditor, Layout3, "Layout3"s, "Editor area layout for layout slot 
 PropString(LiveEditor, Layout4, "Layout4"s, "Editor area layout for layout slot 4 (JSON)"s, ""s);
 PropString(LiveEditor, Layout5, "Layout5"s, "Editor area layout for layout slot 5 (JSON)"s, ""s);
 PropInt(LiveEditor, LayoutActive, "LayoutActive"s, "Active editor area layout slot (1-based)"s, 1, 5, 1);
+PropEnum(LiveEditor, Units, "Units"s, "Unit used to display lengths in the live editor"s, int, 0, "VP Units"s, "Metric"s, "Imperial"s);
 
 // Code View settings
 PropInt(CVEdit, BackGroundColor, "BackGroundColor"s, ""s, 0x000000, 0xFFFFFF, RGB(255, 255, 255));

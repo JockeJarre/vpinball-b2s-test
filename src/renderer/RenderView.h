@@ -59,6 +59,7 @@ public:
    vec4 GetOutputAreaClip() const; // Output area in clip space (left, bottom, right, top), matching RenderPass::m_areaOfInterest convention
    void GetOutputAreaSize(int& w, int& h) const; // Output area size in pixels
    int m_renderWidth = 0, m_renderHeight = 0; // Render size without supersampling (AAFactor) applied
+   float m_aaFactor = 1.f; // Supersampling factor of the render targets (kept through resizes)
    int m_renderSourceWidth = 0, m_renderSourceHeight = 0; // Output size the render size was computed from
 
    void GetRenderSize(int& w, int& h) const
@@ -138,6 +139,8 @@ public:
    RenderTarget* GetBackBufferTexture() const { return m_pOffscreenBackBufferTexture1; } // Main render target, with MSAA resolved if any, also may have stereo output (2 viewports)
    RenderTarget* GetPreviousBackBufferTexture() const { return m_pOffscreenBackBufferTexture2; } // Same as back buffer but for previous frame
    void SwapBackBufferRenderTargets();
+   Matrix3D m_prevFrameViewProj[2]; // View x projection the previous frame's back buffer was rendered with (used to reproject it, e.g. as ball reflection probe)
+   bool m_prevFrameViewProjValid = false;
    void ResizeRenderTargets(); // Follows the output size (resizable window, panel resize)
 
    RenderTarget* m_pAORenderTarget1 = nullptr;

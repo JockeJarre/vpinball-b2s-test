@@ -158,15 +158,15 @@ public:
    static inline constexpr ItemTypeEnum ItemType = ItTy;                                                                                                                                     \
    static inline constexpr int TypeNameID = IDS_TB_##ResName;
 
-#define STANDARD_EDITABLE_COPY_FOR_PLAY_IMPL(type) \
-   type *dst = type::COMCreate(); \
-   dst->Init(0.f, 0.f, false, true); \
-   dst->m_name = m_name; \
-   dst->m_desktopBackdrop = m_desktopBackdrop; \
-   dst->SetUILock(IsUILocked()); \
-   dst->SetUIVisible(IsUIVisible(false)); \
-   dst->m_d = m_d; \
-   dst->m_timerInterval = m_timerInterval; \
+#define STANDARD_EDITABLE_COPY_FOR_PLAY_IMPL(type)                                                                                                                                           \
+   type *dst = type::COMCreate();                                                                                                                                                            \
+   dst->Init(0.f, 0.f, false, true);                                                                                                                                                         \
+   dst->m_name = m_name;                                                                                                                                                                     \
+   dst->m_desktopBackdrop = m_desktopBackdrop;                                                                                                                                               \
+   dst->SetUILock(IsUILocked());                                                                                                                                                             \
+   dst->SetUIVisible(IsUIVisible(false));                                                                                                                                                    \
+   dst->m_d = m_d;                                                                                                                                                                           \
+   dst->m_timerInterval = m_timerInterval;                                                                                                                                                   \
    dst->m_timerEnabled = m_timerEnabled;
 
 #define STANDARD_EDITABLE_WITH_DRAGPOINT_COPY_FOR_PLAY_IMPL(type, curve)                                                                                                                     \
@@ -286,7 +286,7 @@ public:
    void SetUIVisible(const bool visible) { m_uiVisible = visible; }
 
    // Editor support: when true, the part is rendered (shaded) instead of drawn as a wireframe when the
-   // editor is in a wireframe shade mode, and the part group visibility mask does not apply to it
+   // editor is in a wireframe shade mode
    virtual bool IsShownInEditor() const { return false; }
 
    HRESULT put_TimerEnabled(VARIANT_BOOL newVal, BOOL *pte);

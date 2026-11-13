@@ -116,19 +116,17 @@ public:
    mutable std::shared_ptr<const struct CompressedTexture> m_compressed;
 #endif
 
-   bool IsMD5HashComputed() const { return !m_isMD5Dirty; }
-   uint8_t* GetMD5Hash() const { UpdateMD5(); return m_md5Hash; }
-   void SetMD5Hash(uint8_t* md5) const { const std::lock_guard<std::mutex> lock(m_lazyMutex); memcpy(m_md5Hash, md5, sizeof(m_md5Hash)); m_isMD5Dirty = false; }
-
    bool IsOpaqueComputed() const { return !m_isOpaqueDirty; }
    bool IsOpaque() const override { UpdateOpaque(); return m_isOpaque; }
    void SetIsOpaque(const bool v) const { const std::lock_guard<std::mutex> lock(m_lazyMutex); m_isOpaque = v; m_isOpaqueDirty = false; }
+
+   static size_t EstimateGPUSize(Format format, unsigned int width, unsigned int height); // Uncompressed, with mipmaps
+   size_t GetEstimatedGPUSize() const; // On the GPU: of the compressed data if any, with mipmaps
 
 private:
    BaseTexture(const unsigned int w, const unsigned int h, const Format format, const bool allocate = true);
    static std::shared_ptr<BaseTexture> CreateFromFreeImage(struct FIBITMAP *dib, const bool isImageData, unsigned int maxTexDimension, bool resizeOnLowMem) noexcept; // also free's/delete's the dib inside!
 
-   void UpdateMD5() const;
    void UpdateOpaque() const;
 
    const unsigned int m_width, m_height;
@@ -143,8 +141,6 @@ private:
    // These field are (lazily) computed from the data, therefore they do not impact the constness of the object
    // Written under m_lazyMutex (shared between threads). Dirty flags are cleared after the value is set, so a reader seeing a clear flag needs no lock
    mutable std::mutex m_lazyMutex; // Taken after m_aliasMutex
-   mutable std::atomic<bool> m_isMD5Dirty { true };
-   mutable uint8_t m_md5Hash[16] = {};
    mutable std::atomic<bool> m_isOpaqueDirty { true };
    mutable std::atomic<bool> m_isOpaque { true };
    mutable std::mutex m_aliasMutex;
@@ -171,14 +167,17 @@ public:
 
    std::shared_ptr<const BaseTexture> GetRawBitmap(bool resizeOnLowMem, unsigned int maxTexDimension) const override; // Lazily created view of the image, suitable for GPU sampling
 
-   size_t GetEstimatedGPUSize() const;
+   size_t GetEstimatedGPUSize() const; // Of the decoded image if alive, otherwise from the image's size
 
    size_t GetFileSize() const { return m_ppb->m_buffer.size(); }
    const uint8_t *GetFileRaw() const { return m_ppb->m_buffer.data(); }
    const std::filesystem::path& GetFilePath() const { return m_ppb->m_path; }
    bool SaveFile(const std::filesystem::path &filename) const { return m_ppb->WriteToFile(filename); }
 
-   const uint8_t* GetMD5Hash() const { UpdateMD5(); return m_md5Hash; }
+   uint64_t GetContentHash() const; // Hash (XXH3) of the image file data, computed when first needed
+   // Same image file data, exactly: file sizes, then hashes (computing them if needed) and, when both match, the whole file data
+   // byte by byte. Matches are rare, so the full comparison mostly runs on actual duplicates
+   bool HasSameContent(const Texture &other) const;
    bool IsOpaque() const override { UpdateOpaque(); return m_isOpaque; }
    bool IsHDR() const;
 
@@ -192,10 +191,6 @@ public:
 private:
    Texture(string name, PinBinary* ppb, unsigned int width, unsigned int height); // Private to forbid uninitialized objects
 
-   void UpdateMD5() const;
-   void SetMD5Hash(uint8_t *md5) const;
-   void SetMD5HashLocked(uint8_t *md5) const; // Caller must hold m_imageBufferMutex
-
    void UpdateOpaque() const;
 
    PinBinary *const m_ppb; // Original data blob of the image, always defined
@@ -204,10 +199,10 @@ private:
    // These fields are (lazily) computed from the data, therefore they do not impact the constness of the object
    mutable std::weak_ptr<BaseTexture> m_imageBuffer; // Decoded version of the texture in a format suitable for GPU sampling. Note that width and height of the decoded block can be different than width and height of the image since the surface can be limited to smaller sizes by the user or memory
    mutable std::mutex m_decodeMutex; // Serializes the lazy decode, so concurrent requests decode once (taken before m_imageBufferMutex)
-   mutable std::mutex m_imageBufferMutex; // Guards m_imageBuffer and the MD5/opacity writes below, held briefly (preload & compression workers race the logic thread)
+   mutable std::mutex m_imageBufferMutex; // Guards m_imageBuffer and the hash/opacity writes below, held briefly (preload & compression workers race the logic thread)
    // Dirty flags are cleared after the value is set, so a reader seeing a clear flag needs no lock
-   mutable std::atomic<bool> m_isMD5Dirty { true };
-   mutable uint8_t m_md5Hash[16] = {};
+   mutable std::atomic<bool> m_isContentHashDirty { true };
+   mutable uint64_t m_contentHash = 0;
    mutable std::atomic<bool> m_isOpaqueDirty { true };
    mutable std::atomic<bool> m_isOpaque { true };
 };
@@ -637,6 +632,55 @@ inline void copy_rgb_rgba(float* const __restrict dst, const float* const __rest
 }
 
 
+#ifdef ENABLE_SSE_OPTIMIZATIONS
+// Expands an RGB half pixel to 4 float lanes (lane 3 is 0), exactly as half2float, including denormals, Inf and NaN.
+// Reads only the 6 bytes of the pixel, so it is safe on the last pixel of a buffer
+#if (defined(_M_ARM64) || defined(__aarch64__)) && !(defined(__RPI__) || defined(__RK3588__)) // The ARM64 part of math.h's hardware half2float condition
+// ARM64: one native conversion of 4 halves (base ARMv8.0; __m128 is float32x4_t through sse2neon), the conversion half2float uses
+#define HALF_SIMD_NATIVE_ARM64
+inline __m128 half3_to_float4(const uint16_t* __restrict const s)
+{
+   const uint16_t h[4] = { s[0], s[1], s[2], 0 };
+   return vcvt_f32_f16(vreinterpret_f16_u16(vld1_u16(h)));
+}
+#else
+// Integer only, apart from denormals, which are computed from normal floats: and float math on denormal operands costs a lot, so use FTZ!
+inline __m128 half3_to_float4(const uint16_t* __restrict const s)
+{
+   int32_t lo;
+   memcpy(&lo, s, sizeof(lo));
+   const __m128i h = _mm_unpacklo_epi16(_mm_insert_epi16(_mm_cvtsi32_si128(lo), s[2], 2), _mm_setzero_si128());
+   const __m128i em = _mm_and_si128(h, _mm_set1_epi32(0x7FFF));
+   // Normal: exponent rebiased from 15 to 127. Inf/NaN (exponent 31): rebiased twice, to 255, keeping the mantissa (NaN payload)
+   __m128i bits = _mm_add_epi32(_mm_slli_epi32(em, 13), _mm_set1_epi32(112 << 23));
+   bits = _mm_add_epi32(bits, _mm_and_si128(_mm_cmpgt_epi32(em, _mm_set1_epi32(0x7BFF)), _mm_set1_epi32(112 << 23)));
+   // Denormal or zero (exponent 0, mantissa m): one more exponent step gives 2^-14 * (1 + m/1024), minus 2^-14 leaves m * 2^-24, exactly (Sterbenz lemma)
+   const __m128i isDenorm = _mm_cmplt_epi32(em, _mm_set1_epi32(0x0400));
+   const __m128 denorm = _mm_sub_ps(_mm_castsi128_ps(_mm_add_epi32(bits, _mm_set1_epi32(1 << 23))), _mm_set1_ps(1.f / 16384.f));
+   const __m128 f = _mm_or_ps(_mm_and_ps(_mm_castsi128_ps(isDenorm), denorm), _mm_andnot_ps(_mm_castsi128_ps(isDenorm), _mm_castsi128_ps(bits)));
+   return _mm_or_ps(f, _mm_castsi128_ps(_mm_slli_epi32(_mm_and_si128(h, _mm_set1_epi32(0x8000)), 16)));
+}
+#endif
+#endif
+
+// Copy and convert from fp16 RGB to fp32 RGBA (alpha 1), exactly as half2float.
+// Source must be 3 uint16s, and destination buffer 4 floats per pixel
+inline void half2float_rgb_rgba(float* const __restrict dst, const uint16_t* const __restrict src, const size_t size)
+{
+   for (size_t o = 0; o < size; ++o)
+   {
+#ifdef ENABLE_SSE_OPTIMIZATIONS
+      // Lane 3 is +0.0 (all bits clear): OR-ing in 1.0 sets alpha
+      _mm_storeu_ps(dst + o * 4, _mm_or_ps(half3_to_float4(src + o * 3), _mm_setr_ps(0.f, 0.f, 0.f, 1.f)));
+#else
+      dst[o * 4 + 0] = half2float(src[o * 3 + 0]);
+      dst[o * 4 + 1] = half2float(src[o * 3 + 1]);
+      dst[o * 4 + 2] = half2float(src[o * 3 + 2]);
+      dst[o * 4 + 3] = 1.f;
+#endif
+   }
+}
+
 // Copy and convert from BGR to RGB (=swap R and B channels).
 // Source and destination buffers must be 3 bytes per pixel
 inline void copy_bgr_rgb(unsigned char *const __restrict dst, const unsigned char *const __restrict src, const size_t size)
@@ -694,6 +738,7 @@ inline void copy_bgr_rgb(unsigned char *const __restrict dst, const unsigned cha
 }
 
 // Convert fp32 (4 bytes) to fp16 (2 bytes)
+// As float2half_noLUT(): rounds toward zero; and |src| < 2^-14 is 20-30x slower on x86 without FTZ!
 inline void float2half(uint16_t* const __restrict dst, const float* const __restrict src, const size_t size)
 {
     size_t o = 0;
@@ -748,6 +793,7 @@ inline void float2half(uint16_t* const __restrict dst, const float* const __rest
 }
 
 // Convert fp32 (4 bytes) to fp16 (2 bytes), with removed f16max/inf/nan handling (i.e. if this is sure to be NOT there in the input data)
+// As float2half_noLUT(): rounds toward zero; and |src| < 2^-14 is 20-30x slower on x86 without FTZ!
 inline void float2half_noF16MaxInfNaN(uint16_t *const __restrict dst, const float *const __restrict src, const size_t size)
 {
     size_t o = 0;
@@ -789,6 +835,7 @@ inline void float2half_noF16MaxInfNaN(uint16_t *const __restrict dst, const floa
 }
 
 // Convert fp32 (4 bytes) to fp16 (2 bytes), with removed signed/f16max/inf/nan handling (i.e. if this is sure to be NOT there in the input data)
+// As float2half_noLUT(): rounds toward zero; and |src| < 2^-14 is 20-30x slower on x86 without FTZ!
 inline void float2half_pos_noF16MaxInfNaN(uint16_t *const __restrict dst, const float *const __restrict src, const size_t size)
 {
     size_t o = 0;

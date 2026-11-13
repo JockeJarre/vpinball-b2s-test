@@ -321,7 +321,8 @@ enum class SaveDirtyState
 enum VertexFormat
 {
    VF_POS_TEX,
-   VF_POS_NORMAL_TEX
+   VF_POS_NORMAL_TEX,
+   VF_IMGUI
 };
 
 // These Structs are used for rendering and loading meshes. They must match the VertexDeclaration in RenderDevice.cpp and the loaded meshes.
@@ -356,6 +357,23 @@ public:
    // Texture coordinates (0)
    float tu;
    float tv;
+};
+
+// UI vertex format matching ImDrawVert (position.xy, uv, packed RGBA color): it allows
+// uploading ImGui draw lists to the GPU without any vertex conversion, uses VF_IMGUI
+class VertexUI final
+{
+public:
+   // Position
+   float x;
+   float y;
+
+   // Texture coordinates
+   float tu;
+   float tv;
+
+   // RGBA color, packed as 0xAABBGGRR (ImGui's IM_COL32 layout)
+   uint32_t color;
 };
 
 class LocalString final
@@ -1043,8 +1061,10 @@ inline void wcsncpy_s(WCHAR* const __restrict dest, const size_t dest_size, cons
 string string_replace_all(const string& szStr, const string& szFrom, const string& szTo, const size_t offs = 0);
 string string_replace_all(const string& szStr, const string& szFrom, const char szTo, const size_t offs = 0);
 string string_replace_all(const string& szStr, const char szFrom, const string& szTo, const size_t offs = 0);
+bool IsValidUTF8(const char* str, size_t length); // Also rejects a sequence cut at the end
 string string_from_utf8_or_cp1252(const char* src, size_t srcSize); // UTF-8 text is kept, anything else is taken as legacy Western ANSI
 string string_from_utf8_or_cp1252(string&& src); // Same, returning src itself when it is valid UTF-8
+string ZipEntryNameToUTF8(const char* name, size_t length, bool utf8Flag); // Name of a ZIP archive entry, given its UTF-8 flag (general purpose bit 11), with '/' separators
 bool utf8_to_cp1252(const string& utf8, string& cp1252); // For legacy files written back in their encoding: false if a character does not fit
 string TruncateToUTF16Length(const string& utf8, size_t maxUnits); // Longest prefix (on a character boundary) of at most maxUnits UTF-16 code units
 string TruncateToUTF8Length(const string& utf8, size_t maxBytes); // Longest prefix (on a character boundary) of at most maxBytes bytes

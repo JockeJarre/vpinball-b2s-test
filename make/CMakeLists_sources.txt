@@ -77,6 +77,7 @@ set(VPX_SOURCES
    src/input/InputAction.cpp
    src/input/InputManager.h
    src/input/InputManager.cpp
+   src/input/HIDEnumeration.h
    src/input/OpenPinDevHandler.h
    src/input/OpenPinDevHandler.cpp
    src/input/PhysicsSensor.h
@@ -297,6 +298,7 @@ set(VPX_SOURCES
    src/ui/live/EditorUI.h
    src/ui/live/FileDialog.cpp
    src/ui/live/FileDialog.h
+   src/ui/live/ImGuiHelpers.h
    src/ui/live/NotificationOverlay.cpp
    src/ui/live/NotificationOverlay.h
    src/ui/live/PerfUI.cpp
@@ -337,14 +339,16 @@ set(VPX_SOURCES
    src/ui/live/editor/parts/GateUIPart.cpp
    src/ui/live/editor/parts/HitTargetUIPart.h
    src/ui/live/editor/parts/HitTargetUIPart.cpp
-   src/ui/live/editor/IconsLucide.h
+   src/ui/live/IconsLucide.h
    src/ui/live/editor/parts/KickerUIPart.h
    src/ui/live/editor/parts/KickerUIPart.cpp
+   src/ui/live/editor/ops/LayerSpaceChangeOp.h
+   src/ui/live/editor/ops/LayerSpaceChangeOp.cpp
    src/ui/live/editor/parts/LightUIPart.h
    src/ui/live/editor/parts/LightUIPart.cpp
    src/ui/live/editor/parts/LightSeqUIPart.h
    src/ui/live/editor/parts/LightSeqUIPart.cpp
-   src/ui/live/editor/LucideFont.h
+   src/ui/live/LucideFont.h
    src/ui/live/editor/LiveRenderContext.h
    src/ui/live/editor/LiveRenderContext.cpp
    src/ui/live/editor/OutlinerPanel.h
@@ -363,6 +367,10 @@ set(VPX_SOURCES
    src/ui/live/editor/PropertyPane.cpp
    src/ui/live/editor/parts/RampUIPart.h
    src/ui/live/editor/parts/RampUIPart.cpp
+   src/ui/live/editor/ops/ReferenceImageMath.h
+   src/ui/live/editor/ops/ReferenceImageMath.cpp
+   src/ui/live/editor/ops/ReferenceImageOp.h
+   src/ui/live/editor/ops/ReferenceImageOp.cpp
    src/ui/live/editor/RendererInspectionModal.h
    src/ui/live/editor/RendererInspectionModal.cpp
    src/ui/live/editor/ResURIPicker.h
@@ -372,6 +380,8 @@ set(VPX_SOURCES
    src/ui/live/editor/ScriptPanel.h
    src/ui/live/editor/ScriptPanel.cpp
    src/ui/live/editor/Selection.h
+   src/ui/live/editor/ops/SetOriginOp.h
+   src/ui/live/editor/ops/SetOriginOp.cpp
    src/ui/live/editor/parts/SpinnerUIPart.h
    src/ui/live/editor/parts/SpinnerUIPart.cpp
    src/ui/live/editor/parts/SurfaceUIPart.h
@@ -384,6 +394,8 @@ set(VPX_SOURCES
    src/ui/live/editor/parts/TriggerUIPart.cpp
    src/ui/live/editor/ViewportPane.h
    src/ui/live/editor/ViewportPane.cpp
+   src/ui/live/editor/ViewportSidebar.h
+   src/ui/live/editor/ViewportSidebar.cpp
    
    src/ui/live/ingameui/InGameUI.cpp
    src/ui/live/ingameui/InGameUI.h
@@ -479,14 +491,11 @@ set(VPX_SOURCES
 
    third-party/include/bc6h/basisu_bc6h.cpp
    third-party/include/bc6h/basisu_bc6h.h
-   third-party/include/bc7e/basisu_bc7e_scalar.cpp
-   third-party/include/bc7e/basisu_bc7e_scalar.h
    third-party/include/bc7f/basisu_bc7f.cpp
    third-party/include/bc7f/basisu_bc7f.h
    third-party/include/forsyth.h
    third-party/include/gpuprofiler.cpp
    third-party/include/gpuprofiler.h
-   third-party/include/hidapi/hidapi.h
    third-party/include/hid-report-parser/hid_report_parser.cpp
    third-party/include/hid-report-parser/hid_report_parser.h
    third-party/include/imgui/imconfig.h
@@ -783,7 +792,6 @@ set(VPX_WINDOWS_SOURCES
    third-party/include/scilexer.h
    third-party/include/scintilla.h
    third-party/include/Sci_Position.h
-   third-party/include/hidapi/windows/hid.cpp
    third-party/include/nvapi/nvapi.h
    third-party/include/nvapi/nvapi_lite_common.h
    third-party/include/nvapi/nvapi_lite_d3dext.h
@@ -843,9 +851,6 @@ set(VPX_WINDOWS_SOURCES
    third-party/include/win32xx/include/wxx_webbrowser.h
    third-party/include/win32xx/include/wxx_wincore.h
    third-party/include/win32xx/include/wxx_wincore0.h
-   third-party/include/winsdk/hidpi.h
-   third-party/include/winsdk/hidsdi.h
-   third-party/include/winsdk/hidusage.h
 )
 
 set(VPX_STANDALONE_SOURCES

@@ -23,6 +23,7 @@
 PhysicsEngine::PhysicsEngine(PinTable *const table)
    : m_plumbHandler(table->GetSettings())
    , m_table(table)
+   , m_physicProfile(ResolvePhysicProfile(table)) // Before the colliders are created (below), which are built for it
    , m_hitPlayfield(table)
    , m_hitTopGlass(table)
    , m_hitoctree(this)
@@ -67,6 +68,15 @@ PhysicsEngine::PhysicsEngine(PinTable *const table)
    c_traversed = 0;
    c_tested = 0;
    c_deepTested = 0;
+#endif
+}
+
+PhysicProfile PhysicsEngine::ResolvePhysicProfile(const PinTable *const table)
+{
+#ifdef NEW_PHYSICS
+   return PhysicProfile::V10_9; // NEW_PHYSICS is experimental, on top of the V10_9 fixes (see physconst.h)
+#else
+   return table->m_physicProfile;
 #endif
 }
 
@@ -220,9 +230,7 @@ void PhysicsEngine::FlushStaticQuadTree()
 void PhysicsEngine::AddCollider(HitObject *collider, const bool isUI)
 {
    assert(collider->m_editable != nullptr);
-   collider->m_physics = this;
-   if (MoverObject *const mover = collider->GetMoverObject())
-      mover->m_physics = this;
+   collider->SetPhysics(this); // Also its mover
    collider->CalcHitBBox();
    if (!isUI && (collider->GetType() == eBall))
    {
@@ -294,7 +302,7 @@ void PhysicsEngine::AddCabinetBoundingHitShapes(PinTable *const table)
 
    // playfield:
    m_hitPlayfield = HitPlane(table, Vertex3Ds(0, 0, 1), 0.f);
-   m_hitPlayfield.m_physics = this; // copy assignment above does not preserve it
+   m_hitPlayfield.SetPhysics(this); // copy assignment above does not preserve it
    m_hitPlayfield.SetFriction(table->m_overridePhysics ? table->m_fOverrideContactFriction : table->m_friction);
    m_hitPlayfield.m_elasticity = table->m_overridePhysics ? table->m_fOverrideElasticity : table->m_elasticity;
    m_hitPlayfield.m_elasticityFalloff = table->m_overridePhysics ? table->m_fOverrideElasticityFalloff : table->m_elasticityFalloff;
@@ -304,7 +312,7 @@ void PhysicsEngine::AddCabinetBoundingHitShapes(PinTable *const table)
    Vertex3Ds glassNormal(0, table->m_bottom - table->m_top, table->m_glassBottomHeight - table->m_glassTopHeight);
    glassNormal.Normalize();
    m_hitTopGlass = HitPlane(table, Vertex3Ds(0, glassNormal.z, -glassNormal.y), -table->m_glassTopHeight);
-   m_hitTopGlass.m_physics = this; // copy assignment above does not preserve it
+   m_hitTopGlass.SetPhysics(this); // copy assignment above does not preserve it
    m_hitTopGlass.m_elasticity = 0.2f;
 }
 
@@ -801,30 +809,34 @@ void PhysicsEngine::PhysicsSimulateCycle(float dtime) // move physics forward to
 
       // Maybe a two-phase setup where we first process only contacts, then only collisions
       // could also work.
-#ifdef FIX_PHYSICS
-      // Ball/ball contacts first: contacts can change a ball's normal velocity on its other supports (the friction stopping the
-      // spin of a ball pressed against another ball or a wall pushes it up), which the static contacts resolved after them
-      // (see HitBall::HandleStaticContact)
-      for (HitBall *const pball : m_vballs)
-         pball->m_contactDeltaV.SetZero();
-      const bool forward = rand_mt_01() < 0.5f; // swap order of contact handling randomly
-      for (int pass = 0; pass < 2; ++pass)
-         for (size_t i = 0; i < m_contacts.size(); ++i)
+         if (GetPhysicProfile() == PhysicProfile::V10_9)
          {
-            CollisionEvent& contact = m_contacts[forward ? i : m_contacts.size() - 1 - i];
-            if ((contact.m_obj->GetType() == eBall) == (pass == 0))
-               contact.m_obj->Contact(contact, hittime);
+            // Ball/ball contacts first: contacts can change a ball's normal velocity on its other supports (the friction stopping the
+            // spin of a ball pressed against another ball or a wall pushes it up), which the static contacts resolved after them
+            // (see HitBall::HandleStaticContact)
+            for (HitBall *const pball : m_vballs)
+               pball->m_contactDeltaV.SetZero();
+            const bool forward = rand_mt_01() < 0.5f; // swap order of contact handling randomly
+            for (int pass = 0; pass < 2; ++pass)
+               for (size_t i = 0; i < m_contacts.size(); ++i)
+               {
+                  CollisionEvent &contact = m_contacts[forward ? i : m_contacts.size() - 1 - i];
+                  if ((contact.m_obj->GetType() == eBall) == (pass == 0))
+                     contact.m_obj->Contact(contact, hittime);
+               }
          }
-#else
-      if (rand_mt_01() < 0.5f) // swap order of contact handling randomly
-         for (size_t i = 0; i < m_contacts.size(); ++i)
-            //if (m_contacts[i].m_hittime <= hittime) // does not happen often, and values then look sane, so do this check //!! why does this break some collisions (MM NZ&TT Reloaded Skitso, also CCC (Saloon))? maybe due to ball colliding with multiple things and then some sideeffect?
-               m_contacts[i].m_obj->Contact(m_contacts[i], hittime);
       else
-         for (int i = (int)m_contacts.size() - 1; i != -1; --i)
-            //if (m_contacts[i].m_hittime <= hittime) // does not happen often, and values then look sane, so do this check //!! why does this break some collisions (MM NZ&TT Reloaded Skitso, also CCC (Saloon))? maybe due to ball colliding with multiple things and then some sideeffect?
+      {
+         // V10_8: single unordered pass over the contacts, like VPX 10.8 (ball/ball contacts still resolve, inline with the others)
+         if (rand_mt_01() < 0.5f) // swap order of contact handling randomly
+            for (size_t i = 0; i < m_contacts.size(); ++i)
+               //if (m_contacts[i].m_hittime <= hittime) // does not happen often, and values then look sane, so do this check //!! why does this break some collisions (MM NZ&TT Reloaded Skitso, also CCC (Saloon))? maybe due to ball colliding with multiple things and then some sideeffect?
                m_contacts[i].m_obj->Contact(m_contacts[i], hittime);
-#endif
+         else
+            for (int i = (int)m_contacts.size() - 1; i != -1; --i)
+               //if (m_contacts[i].m_hittime <= hittime) // does not happen often, and values then look sane, so do this check //!! why does this break some collisions (MM NZ&TT Reloaded Skitso, also CCC (Saloon))? maybe due to ball colliding with multiple things and then some sideeffect?
+               m_contacts[i].m_obj->Contact(m_contacts[i], hittime);
+      }
 
       m_contacts.clear();
 

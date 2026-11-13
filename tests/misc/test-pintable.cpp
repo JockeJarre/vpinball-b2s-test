@@ -10,6 +10,7 @@
 #include "parts/Collection.h"
 #include "parts/Material.h"
 #include "parts/surface.h"
+#include "renderer/Texture.h"
 
 #include "doctest.h"
 
@@ -262,4 +263,86 @@ TEST_CASE("PinTable part")
 
       table->Release();
    }
+
+   SUBCASE("default playfield to cabinet transform applies the authored slope")
+   {
+      PinTable* const table = CreateTestTable();
+      table->m_bottom = 2000.f;
+      table->m_glassBottomHeight = 60.f;
+      table->m_groundToLockbarHeight = 900.f;
+      const float h = table->m_groundToLockbarHeight - table->m_glassBottomHeight;
+
+      // A level table keeps the legacy translation-only transform (ground below the playfield)
+      table->m_angletiltMin = table->m_angletiltMax = 0.f;
+      const Matrix3D flat = table->GetDefaultPlayfieldToCabMatrix();
+      const Vertex3Ds flatOrigin = flat * Vertex3Ds(0.f, 0.f, 0.f);
+      CHECK(flatOrigin.x == doctest::Approx(0.f).epsilon(1e-5));
+      CHECK(flatOrigin.y == doctest::Approx(0.f).epsilon(1e-5));
+      CHECK(flatOrigin.z == doctest::Approx(-h).epsilon(1e-5));
+      CHECK(flat.MultiplyVectorNoTranslate(Vertex3Ds(0.f, 0.f, 1.f)).z == doctest::Approx(1.f).epsilon(1e-5));
+
+      table->m_angletiltMin = table->m_angletiltMax = 6.f;
+      const float slope = ANGTORAD(table->GetPlayfieldSlope());
+      const Matrix3D toPf = table->GetDefaultPlayfieldToCabMatrix();
+      const Matrix3D toRoom = Matrix3D::MatrixInverse(toPf);
+
+      // The lockbar line is the pivot: the playfield front edge sits at its authored height
+      // above the ground while the back edge is raised by the slope
+      const Vertex3Ds lockbar = toRoom * Vertex3Ds(0.f, table->m_bottom, 0.f);
+      CHECK(lockbar.y == doctest::Approx(table->m_bottom).epsilon(1e-5));
+      CHECK(lockbar.z == doctest::Approx(h).epsilon(1e-5));
+      const Vertex3Ds back = toRoom * Vertex3Ds(0.f, 0.f, 0.f);
+      CHECK(back.z == doctest::Approx(h + table->m_bottom * sinf(slope)).epsilon(1e-5));
+
+      // The room axes are inclined by the slope in playfield space: X is shared (pivot axis),
+      // the room floor rises toward the front of the table, the up axis leans toward the back
+      const Vertex3Ds xAxis = toPf.MultiplyVectorNoTranslate(Vertex3Ds(1.f, 0.f, 0.f));
+      CHECK(xAxis.y == doctest::Approx(0.f).epsilon(1e-5));
+      CHECK(xAxis.z == doctest::Approx(0.f).epsilon(1e-5));
+      const Vertex3Ds yAxis = toPf.MultiplyVectorNoTranslate(Vertex3Ds(0.f, 1.f, 0.f));
+      CHECK(yAxis.y == doctest::Approx(cosf(slope)).epsilon(1e-5));
+      CHECK(yAxis.z == doctest::Approx(sinf(slope)).epsilon(1e-5));
+      const Vertex3Ds zAxis = toPf.MultiplyVectorNoTranslate(Vertex3Ds(0.f, 0.f, 1.f));
+      CHECK(zAxis.y == doctest::Approx(-sinf(slope)).epsilon(1e-5));
+      CHECK(zAxis.z == doctest::Approx(cosf(slope)).epsilon(1e-5));
+
+      // Round trip
+      const Vertex3Ds p = toPf * (toRoom * Vertex3Ds(3.f, -7.f, 11.f));
+      CHECK(p.x == doctest::Approx(3.f).epsilon(1e-4));
+      CHECK(p.y == doctest::Approx(-7.f).epsilon(1e-4));
+      CHECK(p.z == doctest::Approx(11.f).epsilon(1e-4));
+
+      table->Release();
+   }
+}
+
+TEST_CASE("PinTable image import and removal with the lookup table in use")
+{
+   // Once the lookup table is set up (play, live editor), GetImage only looks there: an imported image must be found right away, and a
+   // reimport under the same name must not leave the table pointing at the deleted image
+   PinTable* const table = CreateTestTable();
+   table->SetupLookUpTables(true);
+   const std::filesystem::path file = GetAssetPath() / "test000-default-table-Ref.webp";
+   Texture* const image = table->ImportImage(file, "imported"s);
+   REQUIRE(image != nullptr);
+   CHECK(table->GetImage("imported"s) == image);
+   Texture* const reimported = table->ImportImage(file, "imported"s); // Deletes 'image'
+   REQUIRE(reimported != nullptr);
+   CHECK(table->GetImage("imported"s) == reimported);
+   CHECK(table->GetImageList().size() == 1);
+   // An import without a name takes the file title, and a second one with the same title does not take over the lookup entry
+   Texture* const titled = table->ImportImage(file, ""s);
+   REQUIRE(titled != nullptr);
+   CHECK(table->GetImage(titled->m_name) == titled);
+   Texture* const duplicate = table->ImportImage(file, ""s);
+   REQUIRE(duplicate != nullptr);
+   CHECK(table->GetImage(titled->m_name) == titled);
+   // Removing an image hands its lookup entry to another image of the same name, or drops it: never a dangling pointer
+   const string title = titled->m_name;
+   table->RemoveImage(titled); // Deletes 'titled'
+   CHECK(table->GetImage(title) == duplicate);
+   table->RemoveImage(duplicate);
+   CHECK(table->GetImage(title) == nullptr);
+   CHECK(table->GetImage("imported"s) == reimported);
+   table->Release();
 }

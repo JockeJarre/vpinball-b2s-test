@@ -4,9 +4,10 @@
 #include "ScriptPanel.h"
 
 #include "core/SettingsService.h"
-#include "fonts/IconsForkAwesome.h"
+#include "ui/live/IconsLucide.h"
 #include "parts/pintable.h"
 #include "ui/live/EditorUI.h"
+#include "ui/live/ImGuiHelpers.h"
 #include "ui/live/LiveUI.h"
 
 #include <SDL3/SDL_error.h>
@@ -31,18 +32,6 @@ void ScriptPanel::Show()
    m_focus = true;
    if (!IsVisible())
       m_editor.ShowAreaEditor(AreaType::Script);
-}
-
-void ScriptPanel::Close()
-{
-   const int leaf = m_editor.m_layout.FindLeaf(AreaType::Script);
-   if (leaf >= 0)
-   {
-      EditorUI::PendingAreaOp op {};
-      op.kind = EditorUI::PendingAreaOp::Kind::Close;
-      op.leaf = leaf;
-      m_editor.m_pendingAreaOps.push_back(op);
-   }
 }
 
 bool ScriptPanel::IsVisible() const { return m_editor.m_layout.IsHosted(AreaType::Script); }
@@ -246,7 +235,7 @@ void ScriptPanel::RenderPane(const AreaRect &rect, const int leafId)
       ImGui::AlignTextToFramePadding();
       ImGui::TextUnformatted("External editor:");
       ImGui::SameLine();
-      const float buttonWidth = ImGui::CalcTextSize(ICON_FK_EXTERNAL_LINK, nullptr, true).x + ImGui::GetStyle().FramePadding.x * 2.0f;
+      const float buttonWidth = IconButtonInkSize(ICON_LC_EXTERNAL_LINK).x;
       ImGui::SetNextItemWidth(-buttonWidth - ImGui::GetStyle().ItemSpacing.x);
       ImGui::InputTextWithHint("##exteditor", "Editor command, e.g. notepad++ {file}", &m_extEditorCmd);
       if (ImGui::IsItemDeactivatedAfterEdit())
@@ -254,11 +243,11 @@ void ScriptPanel::RenderPane(const AreaRect &rect, const int leafId)
       ImGui::SameLine();
       const bool canOpenExternal = !readOnly && !m_extEditorCmd.empty();
       ImGui::BeginDisabled(!canOpenExternal);
-      if (ImGui::Button(ICON_FK_EXTERNAL_LINK))
+      if (IconButtonInk(ICON_LC_EXTERNAL_LINK, "##OpenExternal"))
          OpenInExternalEditor();
       ImGui::EndDisabled();
       if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-         ImGui::SetTooltip(canOpenExternal ? "Open the script in the external editor" : "Configure an external editor command to open the script in it");
+         ImGui::SetTooltip("%s", canOpenExternal ? "Open the script in the external editor" : "Configure an external editor command to open the script in it");
 
       // Esc must not revert the typing: ImGui restores the text the field had when it was activated (the edits are applied on
       // every keystroke), so the field is deactivated before it sees the key. The text is kept, the focus leaves the editor,
@@ -284,5 +273,9 @@ void ScriptPane::RenderPane(const AreaRect &rect, const int leafId) { m_editor.m
 
 void ScriptPane::OnUnhosted() { }
 
-void ScriptPane::AppendStatusHints(vector<StatusHint> &hints) const { hints = { { "Esc", "Leave Editor Field" }, { StatusModKey + "+S"s, "Save Table" } }; }
+void ScriptPane::AppendStatusHints(vector<StatusHint> &hints) const
+{
+   // Same save label as the status bar fallback: a play test inspection saves the live changes back to the base table
+   hints = { { "Esc", "Leave Editor Field" }, { StatusModKey + "+S"s, m_editor.IsInspectMode() ? "Save Changes" : "Save Table" } };
+}
 }

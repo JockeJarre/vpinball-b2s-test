@@ -13,7 +13,11 @@ const float4x4 matWorldView     : WORLDVIEW;
 const float4x3 matWorldViewInverse;
 //const float4x4 matWorldViewInverseTranspose; // matWorldViewInverse used instead and multiplied from other side
 const float4x3 matView;
-const float4x4 matProj;
+const float4x4 matPrevViewProj; // view-projection the previous frame was rendered with (to reproject it as a reflection probe)
+// Raytraced impostor (see Ball::Render)
+const float4x4 matProj;       // (flipped) projection
+const float4x4 matProjInv;    // inverse (flipped) projection, mapping rendered clip space back to view space
+const float4x4 ballViewToObj; // view space to unit sphere space
 //const float4x4 matViewInverseInverseTranspose; // matView used instead and multiplied from other side
 
 texture  Texture0; // base texture
@@ -56,6 +60,7 @@ sampler2D tex_ball_playfield : TEXUNIT4 = sampler_state // playfield
 #include "Material.fxh"
 
 const float4x3 orientation;
+const float4   clip_plane;     // clip plane in table coordinate system, tested against the analytic hit point
 const float4   invTableRes_reflection;
 const float4   w_h_disableLighting;
 #define disableLighting (w_h_disableLighting.z != 0.)
@@ -76,6 +81,17 @@ struct vout
     float4 position    : POSITION0;
     float4 normal_t0x  : TEXCOORD0; // tex0 is stored in w of float4s
     float4 worldPos_t0y: TEXCOORD1;
+};
+
+//vertex to pixel shader structure of the raytraced impostor quad
+struct voutQuad
+{
+    float4 position : POSITION0;
+    // camera ray in view space and in unit sphere space (same ray parameter)
+    float3 rayOriginView : TEXCOORD0;
+    float3 rayDirView    : TEXCOORD1;
+    float3 rayOriginObj  : TEXCOORD2;
+    float3 rayDirObj     : TEXCOORD3;
 };
 
 //vertex to pixel shader structure
@@ -105,6 +121,24 @@ vout vsBall( const in vin IN )
     OUT.position = mul(pos, matWorldViewProj);
     OUT.normal_t0x = float4(normal,IN.tex0.x);
     OUT.worldPos_t0y = float4(p,IN.tex0.y);
+    return OUT;
+}
+
+voutQuad vsBallQuad( const in vin IN )
+{
+    // IN.position is a clip space corner of the impostor quad (see Ball::Render), at the nearest projected ball depth
+    voutQuad OUT;
+    OUT.position = float4(IN.position.xyz, 1.0);
+    // Ray through the corner, between its unprojected points at clip depth 0 (the origin) and 1. The projection center is
+    // not assumed to be the view space origin, which it is not with scene scale, layback, stereo eye shift or orthographic
+    // views. The unprojected w only depends on the clip depth, so the points are linear across the quad and interpolate
+    // exactly. The ray is also expressed in unit sphere space (affine, so with the same ray parameter)
+    const float4 p0 = mul(float4(IN.position.xy, 0.0, 1.0), matProjInv);
+    const float4 p1 = mul(float4(IN.position.xy, 1.0, 1.0), matProjInv);
+    OUT.rayOriginView = p0.xyz / p0.w;
+    OUT.rayDirView = p1.xyz / p1.w - OUT.rayOriginView;
+    OUT.rayOriginObj = mul(float4(OUT.rayOriginView, 1.0), ballViewToObj).xyz;
+    OUT.rayDirObj = mul(float4(OUT.rayDirView, 0.0), ballViewToObj).xyz;
     return OUT;
 }
 
@@ -157,10 +191,54 @@ float3 ballLightLoop(const float3 pos, const float3 N, const float3 V, float3 di
 //------------------------------------
 // PIXEL SHADER
 
-float4 psBall( const in vout IN, uniform bool equirectangularMap, uniform bool decalMode ) : COLOR
+float4 psBall( const in voutQuad IN, uniform bool equirectangularMap, uniform bool decalMode, out float depth : DEPTH ) : COLOR
 {
-    const float3 V = normalize(/*camera=0,0,0,1*/-IN.worldPos_t0y.xyz);
-    const float3 N = normalize(IN.normal_t0x.xyz);
+    // Analytic raycast of the unit sphere, in its own space (so the anti stretch ellipsoid comes for free): exact silhouette, surface point and normal
+    const float3 o_o = IN.rayOriginObj;
+    const float3 d_o = IN.rayDirObj;
+    // Numerically stable form, for balls small relative to their distance: with a normalized direction, the squared
+    // distance of the ray to the center is computed directly instead of as a difference of large terms
+    const float invLenD = rsqrt(dot(d_o, d_o));
+    const float3 dir = d_o * invLenD;
+    const float b = dot(o_o, dir);
+    const float3 h = o_o - b * dir; // ray point closest to the center
+    const float discr = 1.0 - dot(h, h);
+    // Analytic silhouette antialiasing: fade out the coverage over ~1 pixel around the outline (discr is 0 there)
+    const float coverage = saturate(discr / max(fwidth(discr), 1e-7) + 0.5);
+    // Evaluated before the discards (for a ray missing the sphere, at its closest point): the decal gradients need every
+    // pixel of each 2x2 quad
+    const float t_dir = -b - sqrt(max(discr, 0.0)); // along the normalized direction
+    const float3 n_obj = normalize(o_o + t_dir * dir); // hit point on the unit sphere = exact normal
+    const float t_hit = t_dir * invLenD; // ray parameter, shared with view space
+
+    // Decal UV, reproducing the ball mesh UVs, with explicit gradients: implicit ones jump where the longitude wraps
+    // (at +-pi, and u at 1), selecting the smallest mip along a meridian. The longitude gradient is derived from the
+    // normal instead, d(atan2(y, x)) = (x dy - y dx) / (x^2 + y^2), which has no wrap (clamped to pi like a wrapped
+    // difference, as it grows unbounded at the poles)
+    const float2 decalUV = float2(frac(0.5935 + atan2(n_obj.y, n_obj.x) * 0.1339), 0.5 + asin(clamp(n_obj.z, -1., 1.)) * 0.2678);
+    const float2 nxyDx = ddx(n_obj.xy);
+    const float2 nxyDy = ddy(n_obj.xy);
+    const float invLen2 = 1.0 / max(dot(n_obj.xy, n_obj.xy), 1e-6);
+    const float dLonX = clamp((n_obj.x * nxyDx.y - n_obj.y * nxyDx.x) * invLen2, -3.14159265, 3.14159265);
+    const float dLonY = clamp((n_obj.x * nxyDy.y - n_obj.y * nxyDy.x) * invLen2, -3.14159265, 3.14159265);
+    const float2 decalDx = float2(dLonX * 0.1339, ddx(decalUV.y));
+    const float2 decalDy = float2(dLonY * 0.1339, ddy(decalUV.y));
+
+    if (coverage <= 0.0)
+        discard;
+    if (t_hit <= 0.0) // Before the ray origin, that is in front of the near plane: clipped like the rest of the frame
+        discard;
+    // Test the clip plane at the analytic surface point (not at the impostor quad depth)
+    clip(dot(clip_plane, float4(mul_w1(n_obj, orientation), 1.0)));
+    const float3 hit_view = IN.rayOriginView + t_hit * IN.rayDirView;
+
+    // Exact per pixel depth of the analytic hit
+    const float4 hit_clip = mul(float4(hit_view, 1.0), matProj);
+    depth = hit_clip.z / hit_clip.w;
+
+    // Normals transform by the transpose of the inverse transform (normalized as it is not orthonormal with anti stretch)
+    const float3 N = normalize(mul(ballViewToObj, float4(n_obj, 0.0)).xyz);
+    const float3 V = normalize(/*camera=0,0,0,1*/-hit_view);
     const float3 R = reflect(V, N);
 
     float3 ballImageColor;
@@ -183,7 +261,7 @@ float4 psBall( const in vout IN, uniform bool equirectangularMap, uniform bool d
       ballImageColor = tex2Dlod(tex_ball_color, float4(uv, 0., lod)).rgb;
     }
 
-    const float4 decalColorT = tex2D(tex_ball_decal, float2(IN.normal_t0x.w, IN.worldPos_t0y.w));
+    const float4 decalColorT = tex2Dgrad(tex_ball_decal, decalUV, decalDx, decalDy);
     float3 decalColor = decalColorT.rgb;
 
     if (!decalMode)
@@ -197,7 +275,7 @@ float4 psBall( const in vout IN, uniform bool equirectangularMap, uniform bool d
        ballImageColor = ScreenHDR(ballImageColor, decalColor);
 
     BRANCH if (disableLighting)
-       return float4(ballImageColor,cBase_Alpha.a);
+       return float4(ballImageColor,cBase_Alpha.a * coverage);
 
     if (!decalMode)
        ballImageColor *= fenvEmissionScale_TexWidth.x;
@@ -211,12 +289,13 @@ float4 psBall( const in vout IN, uniform bool equirectangularMap, uniform bool d
     const float NdotR = dot(playfield_normal, R);
 
     const float3 playfield_p0 = mul_w1(float3(/*playfield_pos=*/0.,0.,0.), matWorldView);
-    const float t = dot(playfield_normal, IN.worldPos_t0y.xyz - playfield_p0) / NdotR;
-    const float3 playfield_hit = IN.worldPos_t0y.xyz - t * R;
+    const float t = dot(playfield_normal, hit_view - playfield_p0) / NdotR;
+    const float3 playfield_hit = hit_view - t * R;
 
     // New implementation: use previous frame as a reflection probe instead of computing a simplified render (this is faster and more accurate, support playfield mesh, lighting,... but there can be artefacts, with self reflection,...)
-    // TODO use previous frame projection instead of the one of the current frame to limit reflection distortion (still this is minimal)
-    const float4 proj = mul(float4(playfield_hit, 1.0), matProj);
+    // Move the hit point back to world space, then reproject it with the view-projection the previous frame was rendered with
+    const float3 playfield_hit_world = mul(float4(playfield_hit, 1.0), matWorldViewInverse);
+    const float4 proj = mul(float4(playfield_hit_world, 1.0), matPrevViewProj);
     const float2 uvp = float2(0.5, 0.5) + float2(proj.x, -proj.y) * (0.5 / proj.w);
     const float3 playfieldColor = 0.25 * (
           tex2D(tex_ball_playfield, uvp + float2(w_h_disableLighting.x, 0.)).rgb
@@ -249,8 +328,8 @@ float4 psBall( const in vout IN, uniform bool equirectangularMap, uniform bool d
        specular *= float3(1.,1.,1.)-decalColor; // see above
 
     float4 color;
-    color.rgb = ballLightLoop(IN.worldPos_t0y.xyz, N, V, diffuse, glossy, specular, 1.0, false);
-    color.a = cBase_Alpha.a;
+    color.rgb = ballLightLoop(hit_view, N, V, diffuse, glossy, specular, 1.0, false);
+    color.a = cBase_Alpha.a * coverage;
     return color;
 }
 
@@ -273,9 +352,9 @@ float4 psBallTrail( in voutTrail IN ) : COLOR
 //------------------------------------
 // Techniques
 
-technique RenderBall { pass p0 { vertexshader = compile vs_3_0 vsBall(); pixelshader  = compile ps_3_0 psBall(true, false);	}}
-technique RenderBall_DecalMode { pass p0 { vertexshader = compile vs_3_0 vsBall(); pixelshader  = compile ps_3_0 psBall(true, true); }}
-technique RenderBall_SphericalMap {	pass p0	{ vertexshader = compile vs_3_0 vsBall(); pixelshader = compile ps_3_0 psBall(false, false); }}
-technique RenderBall_SphericalMap_DecalMode { pass p0 { vertexshader = compile vs_3_0 vsBall(); pixelshader = compile ps_3_0 psBall(false, true); }}
+technique RenderBall { pass p0 { vertexshader = compile vs_3_0 vsBallQuad(); pixelshader  = compile ps_3_0 psBall(true, false);	}}
+technique RenderBall_DecalMode { pass p0 { vertexshader = compile vs_3_0 vsBallQuad(); pixelshader  = compile ps_3_0 psBall(true, true); }}
+technique RenderBall_SphericalMap {	pass p0	{ vertexshader = compile vs_3_0 vsBallQuad(); pixelshader = compile ps_3_0 psBall(false, false); }}
+technique RenderBall_SphericalMap_DecalMode { pass p0 { vertexshader = compile vs_3_0 vsBallQuad(); pixelshader = compile ps_3_0 psBall(false, true); }}
 technique RenderBall_Debug { pass p0 { vertexshader = compile vs_3_0 vsBall(); pixelshader = compile ps_3_0 psBallDebug(); }}
 technique RenderBallTrail {	pass p0	{ vertexshader = compile vs_3_0 vsBallTrail(); pixelshader  = compile ps_3_0 psBallTrail();	}}

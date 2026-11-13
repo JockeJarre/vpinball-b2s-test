@@ -11,12 +11,13 @@
 namespace VPX::EditorUI
 {
 
-LiveRenderContext::LiveRenderContext(Player *player, ImDrawList *drawlist, ViewMode viewMode, Renderer::ShadeMode shadeMode, bool needsLiveTableSync)
+LiveRenderContext::LiveRenderContext(Player *player, ImDrawList *drawlist, ViewMode viewMode, Renderer::ShadeMode shadeMode, bool needsLiveTableSync, bool canDrawSceneParts)
    : m_player(player)
    , m_drawlist(drawlist)
    , m_viewMode(viewMode)
    , m_shadeMode(shadeMode)
    , m_needsLiveTableSync(needsLiveTableSync)
+   , m_canDrawSceneParts(canDrawSceneParts)
 {
 }
 
@@ -59,7 +60,6 @@ void LiveRenderContext::DrawLine(const Vertex3Ds &a, const Vertex3Ds &b, ImU32 c
       const ImVec2 p2 = Project(b);
       m_drawlist->AddLine(p1, p2, color);
    }
-   // TODO also render when running in 3D (for logic parts like timers,...)
 }
 
 void LiveRenderContext::DrawCircle(const Vertex3Ds &center, const Vertex3Ds &x, const Vertex3Ds &y, float radius, ImU32 color) const
@@ -78,7 +78,6 @@ void LiveRenderContext::DrawCircle(const Vertex3Ds &center, const Vertex3Ds &x, 
          prev = p;
       }
    }
-   // TODO also render when running in 3D (for logic parts like timers,...)
 }
 
 void LiveRenderContext::DrawHitObjects(IEditable *editable) const
@@ -100,12 +99,24 @@ void LiveRenderContext::DrawHitObjects(IEditable *editable) const
    }
 }
 
+void LiveRenderContext::DrawScenePart(IEditable *editable) const
+{
+   if (m_canDrawSceneParts)
+      m_player->m_renderer->RenderItem(editable, false);
+}
+
 void LiveRenderContext::DrawWireframe(IEditable *editable) const
 {
+   if (!m_canDrawSceneParts)
+      return; // Wireframes record into the view being rendered: no-op outside a view recording (2D overlay, picking contexts)
    if (IsSelected())
    {
-      // Selection overlay
-      g_pplayer->m_renderer->DrawWireframe(editable, convertColor(GetColor(true), 32.f / 255.f), convertColor(GetColor(true), 1.f), false);
+      // Selection overlay: like Blender's object mode, only the edges are drawn by default (the active part lighter), leaving the surface shading visible;
+      // the tint mode adds a faint fill over the whole surface
+      if (m_selectionDisplay == 2)
+         return;
+      const ImU32 color = m_selectionDisplay == 0 ? (m_isActive ? IM_COL32(255, 176, 64, 255) : IM_COL32(230, 110, 0, 255)) : GetColor(true);
+      g_pplayer->m_renderer->DrawWireframe(editable, convertColor(color, m_selectionDisplay == 1 ? 32.f / 255.f : 0.f), convertColor(color, 1.f), false);
    }
    else
    {

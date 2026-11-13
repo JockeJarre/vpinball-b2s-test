@@ -208,7 +208,6 @@ enum class ShaderTechnique : unsigned int
    SHADER_TECHNIQUE(fb_copy),
    SHADER_TECHNIQUE(SSReflection),
 #ifdef ENABLE_BGFX
-   SHADER_TECHNIQUE(fb_resolve_depth_msaa),
    SHADER_TECHNIQUE(fb_copy_depth),
 #endif
 
@@ -290,7 +289,7 @@ enum class ShaderUniform : unsigned int
    SHADER_UNIFORM(ShaderUniformType::Float4, w_h_height, 1), // Post process & Basic (for screen space reflection/refraction)
 
    // Shared material for Ball, Basic and Classic light shaders
-   SHADER_UNIFORM(ShaderUniformType::Float4, clip_plane, 1), // OpenGL & BGFX only
+   SHADER_UNIFORM(ShaderUniformType::Float4, clip_plane, 1), // Table space clip plane (all renderers, only where supported)
    SHADER_UNIFORM(ShaderUniformType::Float4v, basicLightEmission, 2), // OpenGL & BGFX only
    SHADER_UNIFORM(ShaderUniformType::Float4v, basicLightPos, 2), // OpenGL & BGFX only
    SHADER_UNIFORM(ShaderUniformType::Float4v, ballLightEmission, 10), // OpenGL & BGFX only
@@ -324,8 +323,10 @@ enum class ShaderUniform : unsigned int
 
    // Ball Shader
    SHADER_UNIFORM(ShaderUniformType::Float4x3, orientation, 1),
+   SHADER_UNIFORM(ShaderUniformType::Float4x4, ballViewToObj, 2), // Raytraced impostor: view space to unit sphere space, +1 Matrix for stereo
    SHADER_UNIFORM(ShaderUniformType::Float4, invTableRes_reflection, 1),
    SHADER_UNIFORM(ShaderUniformType::Float4, w_h_disableLighting, 1),
+   SHADER_UNIFORM(ShaderUniformType::Float4x4, matPrevViewProj, 2), // Previous frame view-projection (to reproject the previous frame render as ball reflection probe), +1 Matrix for stereo
    SHADER_SAMPLER(tex_ball_color, 0, SamplerAddressMode::SA_REPEAT, SamplerAddressMode::SA_REPEAT, SamplerFilter::SF_TRILINEAR), // base texture
    SHADER_SAMPLER(tex_ball_playfield, 4, SamplerAddressMode::SA_CLAMP, SamplerAddressMode::SA_CLAMP, SamplerFilter::SF_TRILINEAR), // playfield
    SHADER_SAMPLER(tex_ball_decal, 3, SamplerAddressMode::SA_REPEAT, SamplerAddressMode::SA_REPEAT, SamplerFilter::SF_TRILINEAR), // ball decal

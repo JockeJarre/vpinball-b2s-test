@@ -14,6 +14,9 @@
 #include "typedefs3D.h"
 
 class RenderDevice;
+#if defined(ENABLE_BGFX)
+class TextureCompressor;
+#endif
 
 class TextureManager final
 {
@@ -28,12 +31,29 @@ public:
 
    void AddPlaceHolder(ITexManCacheable* memtex);
    void AddPendingUpload(ITexManCacheable* memtex, std::shared_ptr<const BaseTexture> bitmap = nullptr);
-   std::shared_ptr<Sampler> LoadTexture(ITexManCacheable* const memtex, const bool force_linear_rgb);
+   // Sampler of a texture, created on first use. markUsed is false for uploads not caused by a draw (see GetUsedTextures)
+   std::shared_ptr<Sampler> LoadTexture(ITexManCacheable* const memtex, const bool force_linear_rgb, const bool markUsed = true);
    void SetDirty(ITexManCacheable* memtex);
    void UnloadTexture(ITexManCacheable* memtex);
    void UnloadAll();
 
-   vector<ITexManCacheable*> GetLoadedTextures() const;
+   vector<ITexManCacheable*> GetUsedTextures() const; // Textures used since the player started (not only uploaded)
+
+   // Max texture dimension of the loaded images (0 for no limit), applied by all loads (see LoadBitmapCC)
+   void SetMaxTexDimension(const unsigned int maxTexDimension) { m_maxTexDimension = maxTexDimension; }
+
+#if defined(ENABLE_BGFX)
+   // Enables texture compression, backed by the compressor's disk cache. Set before loading any texture (not synchronized)
+   void SetCompressor(std::shared_ptr<TextureCompressor> compressor) { m_compressor = std::move(compressor); }
+#endif
+
+   // Bitmap to upload for a texture: the single loader, for the texture manager and the table loading. With compression enabled, a table
+   // image comes from the disk cache if cached; otherwise the texture is decoded (within the max dimension), then compressed and cached
+   // if allowCompression (slow: for the loading threads, see TextureCompressor::LoadOrCompress). Thread safe (does not use the map)
+   std::shared_ptr<const BaseTexture> LoadBitmapCC(ITexManCacheable* memtex, bool resizeOnLowMem = false, bool allowCompression = false, const std::function<bool()>& isCompressionDiscarded = nullptr) const;
+
+   // Ends the table loading: logs the compression statistics, and removes the disk cache files of the images not in tableImages
+   void EndLoading(const vector<Texture*>& tableImages) const;
    bool IsLinearRGB(ITexManCacheable* memtex) const;
 
 #if defined(ENABLE_BGFX)
@@ -57,6 +77,7 @@ private:
       bool dirty[VARIANT_COUNT] = { false, false };
       ITexManCacheable* tex = nullptr;
       bool isPlaceHolder = false;
+      bool used = false; // Loaded for a draw, not only uploaded (see LoadTexture's markUsed)
       std::shared_ptr<const class BaseTexture> pendingUpload;
       uint32_t lastUsedFrame = 0; // Frame index of the last use, for LRU eviction
       size_t gpuBytes[VARIANT_COUNT] = { 0, 0 }; // Estimated resident bytes of each variant
@@ -64,6 +85,10 @@ private:
       uint32_t upgradeRetryFrame = 0; // Frame index before which a degraded variant is not retried at full size
    };
    RenderDevice& m_rd;
+   std::atomic<unsigned int> m_maxTexDimension = 0;
+#if defined(ENABLE_BGFX)
+   std::shared_ptr<TextureCompressor> m_compressor;
+#endif
    // Guards m_map, as loader threads register and upload textures while the main thread renders the loading UI.
    // Held for whole calls: code run under it (sampler creation, bitmap decode) must not call back into the manager.
    mutable std::mutex m_mapMutex;
@@ -74,17 +99,16 @@ private:
 #if defined(ENABLE_BGFX)
 #pragma region GPU memory budget management (BGFX only)
 
-   // Vulkan does not provide a driver managed fallback to system memory: when device memory is
-   // exhausted, resource creation fails and the backend crashes. Other backends page GPU memory
-   // instead, which avoids the crash but degrades to unusable framerates. To address both, the
-   // resident texture set is kept inside a safety share of the budget reported through bgfx::Stats
-   // (VK_EXT_memory_budget, QueryVideoMemoryInfo or NvAPI, depending on the backend and GPU): least
-   // recently used samplers are evicted first (they are transparently re-uploaded on next use), then
-   // images are downsized, and only then degraded to the fallback texture, instead of crashing.
-   // On backends that do not report a budget (OpenGL, Metal, WebGPU, D3D11 on non NVIDIA GPUs),
-   // gpuMemoryMax stays <= 0 and uploads remain unmanaged as before.
+   // This is only enabled for the Vulkan backend, the only backend without a driver managed
+   // fallback to system memory: when device memory is exhausted, resource creation fails and the
+   // backend crashes. To address this, the resident texture set is kept inside a safety share of
+   // the budget reported through bgfx::Stats (VK_EXT_memory_budget): least recently used samplers
+   // are evicted first (they are transparently re-uploaded on next use), then images are
+   // downsized, and only then degraded to the fallback texture, instead of crashing.
+   // Other backends (D3D11, D3D12, OpenGL, Metal, WebGPU) page GPU memory to system RAM under
+   // pressure, which avoids the crash at the cost of framerates: the management is kept off for
+   // them (m_gpuMemBudget stays <= 0) and uploads remain unmanaged as before.
 
-   size_t EstimateGpuBytes(const BaseTexture* tex) const;
    std::shared_ptr<Sampler> CreateSampler(MapEntry& entry, SamplerVariant variant, bool force_linear_rgb, std::shared_ptr<const BaseTexture> bitmap);
 
    void RefreshBudget(); // Samples the stats published by OnFrameStats, at most once per frame

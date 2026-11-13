@@ -8,6 +8,7 @@
 #include "PlungerHandler.h" // PlungerSensor is constructed below: it must be a complete type wherever this header is included
 #include "physics/cabinet/CabinetNudgeSensor.h"
 #include "physics/cabinet/GamepadNudge.h"
+#include "ui/live/IconsLucide.h"
 
 
 class SDLInputHandler final : public InputManager::InputHandler
@@ -130,10 +131,10 @@ private:
       case SDL_GAMEPAD_BUTTON_LABEL_B: return "B"s;
       case SDL_GAMEPAD_BUTTON_LABEL_X: return "X"s;
       case SDL_GAMEPAD_BUTTON_LABEL_Y: return "Y"s;
-      case SDL_GAMEPAD_BUTTON_LABEL_CROSS: return "Cross"s; // ICON_FK_TIMES
-      case SDL_GAMEPAD_BUTTON_LABEL_CIRCLE: return "Circle"s; // ICON_FK_CIRCLE_O
-      case SDL_GAMEPAD_BUTTON_LABEL_SQUARE: return "Square"s; // ICON_FK_SQUARE_O
-      case SDL_GAMEPAD_BUTTON_LABEL_TRIANGLE: return "Triangle"s; // Sadly, nothing for triangle
+      case SDL_GAMEPAD_BUTTON_LABEL_CROSS: return ICON_LC_X;
+      case SDL_GAMEPAD_BUTTON_LABEL_CIRCLE: return ICON_LC_CIRCLE;
+      case SDL_GAMEPAD_BUTTON_LABEL_SQUARE: return ICON_LC_SQUARE;
+      case SDL_GAMEPAD_BUTTON_LABEL_TRIANGLE: return ICON_LC_TRIANGLE;
       default:
          switch (button)
          {
@@ -478,16 +479,16 @@ private:
                   appSettings.SetPlayerVR_ControllerCabZOffset(-2.5f, false);
                   appSettings.SetPlayerVR_LockFeetToGround(true, false);
                   appSettings.SetPlayerVR_OverrideLockbarWidth(true, false);
-                  appSettings.SetPlayer_LockbarWidth(61.0f, false);
+                  appSettings.SetPlayerVR_ControllerCabWidthOffset(22.7f, false); // 61.0cm width, offset to the controller holes
                   //appSettings.SetPlayerVR_OverrideLockbarHeight(true, false); // commented out as this can be adjusted
                   //appSettings.SetPlayer_LockbarHeight(95.0f, false);
                   if (g_pplayer && g_pplayer->m_vrDevice)
                   {
                      g_pplayer->m_vrDevice->SetControllerCabYOffset(-22.5f);
                      g_pplayer->m_vrDevice->SetControllerCabZOffset(-2.5f);
+                     g_pplayer->m_vrDevice->SetControllerCabWidthOffset(22.7f);
                      g_pplayer->m_vrDevice->SetLockFeetToGround(true);
                      g_pplayer->m_vrDevice->SetOverrideLockbarWidth(true);
-                     g_pplayer->m_vrDevice->SetCustomLockbarWidth(61.0f);
                      //g_pplayer->m_vrDevice->SetOverrideLockbarHeight(true); // commented out as this can be adjusted
                      //g_pplayer->m_vrDevice->SetCustomLockbarHeight(95.0f);
                   }

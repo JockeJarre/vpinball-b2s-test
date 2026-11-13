@@ -2,7 +2,7 @@ VP 10.8.1 Changelog
 ------------------------
 
 Main highlighted features, detailed below:
-- VPX is now also available as part of a standalone player, and for a large variety of platforms: Linux, macOS (incl. HiDPI), iOS, Android (13+), Raspberry Pi, Windows, ...
+- VPX is now also available as part of a standalone player, and for a large variety of platforms: Linux, macOS (incl. HiDPI), iOS, Android (13+), Raspberry Pi, Windows, Web browser (via WebAssembly/WebGPU), ...
   The standalone player package includes all components needed to play tables. As it also exists for Windows, it can help remove some sporadic slowdown/stutters (due to VBScript scanning done by the OS, which is non-existant in the standalone build due to libwinevbs usage).
 - Major internal technical update: The BGFX variant is now the default flavor, the DX9 and OpenGL versions are deprecated and should not be used anymore, as these do not feature all of the new improvements.
 - Deep work on gameplay stability and latency has been performed, leading to much improved overall game stability, less latency, better framerates, and nudging.
@@ -16,6 +16,7 @@ FEATURES:
 
 - add -v command line option to just output the version and quit
 - add -CaptureAttract command line option to automatically capture an attract video
+- add -Convert command line option to convert a table between the .vpx and .vpz pack file formats
 - B2S plugin: add a 'Keep aspect ratio' setting (plugin settings page) which fits the backglass and score view
   images in their window at their authored aspect ratio. The drawing surface (the fictitious screen the plugin
   renders on) is padded to the shape of the window, so that the host scales both axes by the same factor: the
@@ -73,6 +74,11 @@ FEATURES:
   . The legacy behavior (everything in the application folder, so mixing all music, user, cache, scripts, ... -files between all tables) is still available by checking
     the corresponding option in the 'INI->Editor->UI Options' dialog. It requires the application to be installed in a folder with read/write access. It breaks
     the ability to have multiple versions of VPX installed on a single computer without their settings conflicting.
+
+- a new 'VPZ pack' file format has been added as an additional file format targeted at 2 uses cases: collaboration using vpz folder and a versioning tools like git, 
+  sharing parts (instead of complete tables) using vpz file. Note that this format is still preliminary and may change in backward incompatible ways
+
+- VPX can now also run inside a web browser, through a WebAssembly/WebGPU build, including the editor
 
 - table settings override will only save actual overrides, so only those settings that are different from application settings and default values
 - note that in general, the separation of table settings vs global settings (and overrides) has been dramatically revamped, also in the InGameUI
@@ -173,10 +179,15 @@ FEATURES:
   . VPX's TweakUI is now fully supported in VR, which allows to adjust all settings in-game using the usual pinball controls, also supporting continuous recentering.
   . (hacky) external window capture has been removed and replaced by the ability to use external plugin renderers in the 3D scene, using flashers. Tables using the
     legacy feature are automatically updated. This allows to use all plugins in 3D at full resolution (backglass, scoreview, PinUp player, dimmed segment, toppers,...).
+    The legacy flasher 'VideoCap' script API is deprecated, and its use is reported by the table audit.
   . New option to add a plugin rendered backglass flasher to handle non VR tables (there used to be a limited hacky fixed backglass image added on all tables, with some hacks to allow VR tables to overwrite it)
   . OpenXR controllers can be used as input, including thumbstick nudging and plunger.
   . OpenXR controllers can be used to position the virtual table in the room.
   . Spatialization of sounds
+  . VR is also supported on macOS, through OpenXR with a Metal backend
+  . Cabinet scaling modes and a seated play cabinet tilt option have been added
+  . The VR settings are now split between the real world setup and per-table tweaks
+  . The player no longer pauses when the desktop window loses focus while playing in VR
 
 - number of layers is not limited anymore. Layers can also be nested and they now feature properties:
   . a visibility mask, that allows to filter on which player mode layers are active (desktop, cabinet, virtual reality, mixed reality, ...)
@@ -197,6 +208,10 @@ FEATURES:
   . 'Additive Blend' was extended with a second sub-mode which darkens what is behind the flasher instead of brightening it (same added light, but with 'Modulate' steering how much is absorbed),
     to fake Fresnel-like reflections (i.e. the CRT reflected of a Pinball 2000 playfield glass).
 
+- parts can now link their state to a shared state source (plugin or external controller) through a 'state source' URI
+  property: this is supported by lights, flashers, primitives, triggers and textboxes (for example driving a flasher or
+  primitive's opacity from a shared state)
+
 - replace layers by hierarchical groups
   Allow groups to have properties (VR space reference, view visibility, ...)
   Prepare for nesting groups (import/export, combined transforms, ...)
@@ -205,6 +220,8 @@ FEATURES:
   This feature is still in early stage and should be considered as a 'feature preview' as it will most likely evolve more, and the programming interface is not yet fully stabilized, so breaking changes may still happen!
   The following plugins are included with VPX:
   . AlphaDMD: render alpahanumeric segment displays inside any DMD (physical or virtual)
+  . AltSound: provides alternate sounds for PinMAME emulated tables
+  . BAM: headtracking driven by BAM-Tracker for the cabinet 'window' view mode (Windows only)
   . B2S: a newer B2S renderer which supports light fading, better mech animation, but is still far from feature complete, expect more changes!
   . DMDUtil: supports rendering to physical DMDs (ZeDMD,...)
   . DOF: a preliminary port of the Direct Output Framework which allows to drive all kinds of physical feedback hardware (lights, shaker, fan,...)
@@ -213,11 +230,16 @@ FEATURES:
   . PinMAME: a direct interface to PinMAME with some exclusive bonus features like full alphanumeric segment fading
   . PinUp: a preliminary port of PinUp Player that renders and animates video backglass, topper and fullDMD display
   . Remote Control: a plugin that allows to control an instance of VPX from another running instance. For example running VPX on a little controller PC that communicates with a more powerful computer that runs VPX driving a VR headset
-  . Score View: a tool to provide default score rendering (for example DMD, but also supporting alphanumeric segment displays, including dimmed segments)
+  . Nixie: a tool to provide default score rendering (for example DMD, but also supporting alphanumeric segment displays, including dimmed segments)
   . Serum: a DMD colorizer
   . UpscaleDMD: upscale or anti-alias DMD content (modes: MMPX 2x, xBRZ 2x/3x/4x/5x/6x, ScaleFX AA 1x, ScaleFX 3x and Super-XBR 2x)
+  . VNI: a DMD colorizer, based on libvni
   . WMP: the window media player, but as a portable plugin, running on any of the supported platforms
   Note that due to this, some settings (e.g. DMD antialias/upscale) moved from VPX itself to the plugins
+  Plugins may also be installed per-user (in the preferences folder), and can contribute their own pages to the in-game UI.
+  On Windows, the PinMAME plugin falls back to the folders of a registered VPinMAME installation (ROMs, NVRAM, samples,
+  configuration, high scores) when no pinmame folder is found next to the table. The B2S plugin is now enabled by default
+  as the backglass renderer.
 
 - note that the old LiveUI/TweakUI is now split between a LiveEditor for editing, and the InGameUI to change all settings:
 
@@ -232,6 +254,13 @@ FEATURES:
   . Allow to display physics-collider-geometry as a red overlay
   . Fix invalid overlays (missing parts, incorrect position)
   . 3 render modes are available, switchable using the 'Z' key: render, wireframe, passthrough wireframe
+  . The UI is organized in dockable panes that can be freely arranged in a resizable split layout (default layouts are provided, and the layout is persisted per user)
+  . A menubar, tool shelf and status bar, following the Blender UX
+  . Full undo/redo support with a labeled history
+  . Move/rotate/scale gizmo with optional snapping, and modal keyboard editing of transforms
+  . A part library pane to browse and place parts, a blueprint view, and multi-editing of uniform part selections
+  . A script editor pane
+  . The table can be play tested directly from the editor, and tables are loaded/saved asynchronously
 
  - InGameUI (via default 'F12' ingame):
   . Supports all player modes (VR, XR, cabinet, desktop) and all screen orientations
@@ -239,6 +268,8 @@ FEATURES:
   . Add settings pages, moving lots of settings inside these pages
   . Add a system info page, displaying some details of the GPU,CPU,Display,etc, and the paths used to load the various components
   . Navigation using flipper input has been unified: per default, magna buttons allow to move, while flipper buttons allow to select
+
+ - a cross-platform script debugger is available in the LiveUI, replacing the previous Windows-only debugger dialog
 
 - for cabinet users, a new option in the graphics settings allows to enable an automatic window camera fitting at table startup, based on table or screen fitting
 
@@ -250,6 +281,8 @@ FEATURES:
 - texture compression is actually usable (=much faster) when using BGFX
 
 - backside lighting for normal-mapped parts
+
+- normal mapping can now also be used on parts without an albedo texture
 
 - debug builds have now been "replaced" by release builds with debug info, so that stack traces show more usable info by default, and there is less to generate/compile in the github actions
 
@@ -271,10 +304,33 @@ FIXES:
 
 - improve 'resting' ball detection and better filtering for physics hit events
 
+- add a per-table 'Physics Profile' option (in the table's physics properties, defaults to 10.8): existing tables keep the
+  VPX 10.8 physics they were tuned for, while selecting the 10.9 profile enables the corrected physics engine behavior.
+  New tables will use the 10.9 profile.
+  The 10.9 profile fixes the following bugs (all also apply to ball vs ball interactions, which did not exist in 10.8 and
+  always use the improved model whatever the selected profile):
+  . slow shallow touches of walls and rigid polygons were dropped entirely (they reported a bogus hit time), so no contact
+    was created until the ball actually penetrated, which could also corrupt the collision ordering
+  . the friction of a contact was bounded by the gravity component alone, so it nearly vanished on walls and was dead on the top glass
+  . sliding contact friction strength depended on the physics step length instead of applying the full slip-removing impulse
+  . the static-friction gate accidentally tested the surface orientation, so sliding balls on walls got static instead of dynamic friction
+  . contacts could push a ball resting against another contact up its support, making it climb a bit every step and jitter
+  . a slow ball embedded deeper than the touch layer in the playfield was ignored and could sink through
+  . a spinning ball could lose its support on a flipper contact, the centripetal acceleration of its material contact point
+    being misread as the ball accelerating away
+  . flipper inertia now uses the real flipper shape instead of the rod approximation (swing speed and kick/bounce response
+    change with it; the 10.8 profile keeps the rod model).
+    To keep the 10.8 swing speed under the 10.9 profile (the ball response then uses the real shape), multiply the flipper Strength,
+    including values set by the table script, by the ratio of the shape inertia to the rod one: about 0.90 for the default flipper
+    (base radius 21.5, end radius 13, length 130), 0.84 for 25/13/130, 0.75 for thin 15/6 flippers, 1.16 for 20/20/130 (as wide at the
+    end as at the base). Changing the Mass does not work, as it scales the swing and the ball response alike. See docs/PhysicsConstants.md
+  . contact forces handled the ball mass wrongly, so balls with a non-default mass rested/rolled differently on surfaces
+    (no change for the default mass of 1)
+  . very thin playfield triangles (nearly degenerate normals) could produce wrong collision responses
+
 - physics behavior changes that may make existing tables play slightly differently, but are more physically correct:
   . ball-ball contacts are now handled as resting contacts (like ball vs. playfield/walls), and the ball-ball contact normal is now evaluated at the actual hit time.
     Balls resting against each other (e.g. lined up in a trough or lock, or stacked on a slope) are now stable, instead of jittering/creeping.
-  . contact forces now take the ball mass into account, so balls with a non-default mass rest/roll differently on surfaces (no change for the default mass of 1).
   . walls (surfaces) whose points are defined in reversed (clockwise) order used to collide only from the inside (balls passed through them from the outside and then got trapped).
     They now collide from both sides, so they are solid from the outside like walls with the regular point order.
   . nudge: the cabinet model was recalibrated against real cabinet recordings (lower oscillation frequencies, no more 'magic' displacement factors), and the peak acceleration of
@@ -283,6 +339,8 @@ FIXES:
     so launches with a speed sensor are weaker than before (about 17% with the usual rest position of 1/6 of the range).
 
 - improve flipper latency reporting in the performance UI
+
+- fix the Ultracade U-Shock knocker and plunger outputs only working in the first game after starting VPX, and (potentially) support them on Linux and macOS too
 
 - export of a sound from the sound manager will now export the sound file as-is (without adding a wave header in front of non-WAV files)
 - fix wrong/too-loud volume for the test play in the sound manager
@@ -313,7 +371,7 @@ FIXES:
 
 - allow FreeImage to decode PNG with corrupted gamma chunks
 
-- BAM headtracking has been removed again. It could be re-added via the new plugin system though. Any volunteers?
+- BAM headtracking has been re-added as a plugin (Windows only): it is driven by BAM-Tracker and applies to the cabinet 'window' view mode
 
 - note that the support for ancient windows versions (e.g. Windows XP) for the DX9 build has been removed in order to be able to use newer compilers
 - due to this, VPX now allows to use the C++20 language feature set, which means that the windows build system requires Visual Studio 2019 or newer

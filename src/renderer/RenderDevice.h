@@ -48,6 +48,7 @@ void ReportError(const string& errorText, const HRESULT hr, const char *file, co
 
 class Shader;
 class ModelViewProj;
+struct UIListGeometry;
 
 class RenderDeviceState final
 {
@@ -128,6 +129,10 @@ public:
                          const int x2 = -1, const int y2 = -1, const int w2 = -1, const int h2 = -1,
                          const int srcLayer = -1, const int dstLayer = -1);
    void DrawMesh(Shader* shader, const bool isTranparentPass, const Vertex3Ds& center, const float depthBias, std::shared_ptr<MeshBuffer> mb, const PrimitiveTypes type, const uint32_t startIndex, const uint32_t indexCount);
+#if defined(ENABLE_BGFX)
+   void DrawTransientMesh(Shader* shader, const bool isTransparentPass, const float depth, std::shared_ptr<UIListGeometry> geo, std::shared_ptr<MeshBuffer> mb, const PrimitiveTypes type,
+      const uint32_t startIndex, const uint32_t indexCount);
+#endif
    void DrawTexturedQuad(Shader* shader, const Vertex3D_TexelOnly* vertices, const bool isTransparent = false, const float depth = 0.f);
    void DrawTexturedQuad(Shader* shader, const Vertex3D_NoTex2* vertices, const bool isTransparent = false, const float depth = 0.f);
    void DrawFullscreenTexturedQuad(Shader* shader);
@@ -182,6 +187,8 @@ public:
    RenderState& GetActiveRenderState() { return m_current_renderstate; }
 
    void UploadTexture(ITexManCacheable* texture, const bool linearRGB);
+   // Uploads (texture, linearRGB) pairs, without marking them used (see TextureManager::GetUsedTextures)
+   void UploadTextures(const vector<std::pair<ITexManCacheable*, bool>>& textures);
    void SetSamplerState(int unit, SamplerFilter filter, SamplerAddressMode clamp_u, SamplerAddressMode clamp_v);
 
    // Default texture (1x1 Black)
@@ -298,6 +305,7 @@ public:
    bgfx::ProgramHandle m_program = BGFX_INVALID_HANDLE; // Bound program for next draw submission
    bgfx::VertexLayout* m_pVertexTexelDeclaration = nullptr;
    bgfx::VertexLayout* m_pVertexNormalTexelDeclaration = nullptr;
+   bgfx::VertexLayout* m_pVertexImGuiDeclaration = nullptr;
    bgfx::ViewId m_activeViewId = 0;
    uint16_t m_activeViewClearFlags = BGFX_CLEAR_NONE; // Accumulated clear flags of the active view (BGFX applies a single clear per view, using the last defined state)
    uint32_t m_activeViewClearColor = 0;
@@ -311,7 +319,8 @@ public:
    std::binary_semaphore m_frameReadySem { 0 }; // Semaphore to signal when a frame is ready to be submitted
    std::mutex m_frameMutex; // Mutex to lock acces to retained render frame between logic thread and render thread
 
-   bgfx::ProgramHandle m_srgbMipmapProgram = BGFX_INVALID_HANDLE;
+   // Compute mipmap generation programs, one per cs_mipmap variant (srgba8, rgba8, rgba16f, rgba32f)
+   bgfx::ProgramHandle m_mipmapPrograms[4] = { BGFX_INVALID_HANDLE, BGFX_INVALID_HANDLE, BGFX_INVALID_HANDLE, BGFX_INVALID_HANDLE };
 
    uint64_t m_lastGPUFrameLength = 0;
 
@@ -401,6 +410,7 @@ public:
    IDirect3DVertexDeclaration9* m_currentVertexDeclaration = nullptr;
    IDirect3DVertexDeclaration9* m_pVertexTexelDeclaration = nullptr;
    IDirect3DVertexDeclaration9* m_pVertexNormalTexelDeclaration = nullptr;
+   IDirect3DVertexDeclaration9* m_pVertexImGuiDeclaration = nullptr;
 
    bool m_autogen_mipmap;
    bool m_useNvidiaApi;

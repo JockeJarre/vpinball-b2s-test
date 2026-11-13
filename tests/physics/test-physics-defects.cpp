@@ -82,7 +82,7 @@ TEST_CASE("Resting contact cancels gravity exactly for a unit-mass ball")
    harness.Start();
 
    HitBall ball;
-   ball.m_physics = harness.GetEngine();
+   ball.SetPhysics(harness.GetEngine());
    ball.m_d.m_mass = 1.f;
    ball.m_d.m_vel.SetZero();
    ball.m_angularmomentum.SetZero();
@@ -104,7 +104,7 @@ TEST_CASE("Resting contact velocity gain must be mass-independent")
    harness.Start();
 
    HitBall ball;
-   ball.m_physics = harness.GetEngine();
+   ball.SetPhysics(harness.GetEngine());
    ball.m_d.m_mass = 4.f; // a heavier resting ball still needs only |g|*dt of normal velocity
    ball.m_d.m_vel.SetZero();
    ball.m_angularmomentum.SetZero();
@@ -125,7 +125,7 @@ TEST_CASE("Contact cancels an incoming normal velocity for any mass")
    harness.Start();
 
    HitBall ball;
-   ball.m_physics = harness.GetEngine();
+   ball.SetPhysics(harness.GetEngine());
    ball.m_d.m_mass = 4.f;
    ball.m_d.m_vel.SetZero();
    ball.m_angularmomentum.SetZero();
@@ -154,14 +154,14 @@ CollisionEvent MakeFloorContact(HitBall *ball)
 }
 }
 
-#ifdef FIX_PHYSICS // static contacts also cancel what the contacts resolved before them did to the ball
+// V10_9 profile: static contacts also cancel what the contacts resolved before them did to the ball
 namespace
 {
 // A ball pressed (+y) against something in front of it while rolling towards it: its front surface moves down
 HitBall MakeBlockedRollingBall(PhysicsEngine *physics)
 {
    HitBall ball;
-   ball.m_physics = physics;
+   ball.SetPhysics(physics);
    ball.m_d.m_mass = 1.f;
    ball.m_d.m_vel = Vertex3Ds(0.f, 0.01f, 0.f);
    ball.m_angularmomentum = Vertex3Ds(-0.1f * ball.Inertia(), 0.f, 0.f);
@@ -204,7 +204,7 @@ TEST_CASE("A static contact cancels the lift of a ball/ball contact")
 
    HitBall rear = MakeBlockedRollingBall(harness.GetEngine());
    HitBall front;
-   front.m_physics = harness.GetEngine();
+   front.SetPhysics(harness.GetEngine());
    front.m_d.m_mass = 1.f;
    front.m_angularmomentum.SetZero();
 
@@ -221,7 +221,6 @@ TEST_CASE("A static contact cancels the lift of a ball/ball contact")
    rear.HandleStaticContact(floorColl, 0.3f, (float)PHYS_FACTOR);
    CHECK(rear.m_d.m_vel.z == doctest::Approx(GRAVITYCONST * PHYS_FACTOR)); // just the gravity compensation, no lift
 }
-#endif
 
 TEST_CASE("A static contact does not absorb an impact gained after the hit test")
 {
@@ -233,7 +232,7 @@ TEST_CASE("A static contact does not absorb an impact gained after the hit test"
    harness.Start();
 
    HitBall ball;
-   ball.m_physics = harness.GetEngine();
+   ball.SetPhysics(harness.GetEngine());
    ball.m_d.m_mass = 1.f;
    ball.m_d.m_vel = Vertex3Ds(0.f, 0.f, -5.f); // hit into the surface this cycle
    ball.m_angularmomentum.SetZero();
@@ -255,7 +254,7 @@ TEST_CASE("The normal responses of two static contacts stay independent")
 
    const float dt = (float)PHYS_FACTOR;
    HitBall ball;
-   ball.m_physics = harness.GetEngine();
+   ball.SetPhysics(harness.GetEngine());
    ball.m_d.m_mass = 1.f;
    ball.m_d.m_vel = Vertex3Ds(0.f, 0.f, -GRAVITYCONST * dt); // one step of gravity
    ball.m_angularmomentum.SetZero();
@@ -284,7 +283,7 @@ TEST_CASE("Ball surface acceleration is independent of mass")
    harness.Start();
 
    HitBall ball;
-   ball.m_physics = harness.GetEngine();
+   ball.SetPhysics(harness.GetEngine());
    ball.m_d.m_mass = 4.f;
    ball.m_d.m_vel.SetZero();
    ball.m_angularmomentum.SetZero(); // no rotation: only the linear acceleration remains
@@ -302,7 +301,7 @@ TEST_CASE("Contact friction counters the tangential gravity component for any ma
    harness.Start();
 
    HitBall ball;
-   ball.m_physics = harness.GetEngine();
+   ball.SetPhysics(harness.GetEngine());
    ball.m_d.m_mass = 4.f;
    ball.m_d.m_vel.SetZero();
    ball.m_angularmomentum.SetZero(); // no rotation: SurfaceAcceleration is gravity alone
@@ -365,7 +364,7 @@ TEST_CASE("A vertical HitTriangle registers hits")
    // Same geometry through the 3D path: proves the defect is Hit3DPoly's XY
    // projection, not the vertical plane itself.
    const Vertex3Ds rgv[3] = { Vertex3Ds(600.f, 400.f, 0.f), Vertex3Ds(600.f, 600.f, 0.f), Vertex3Ds(600.f, 600.f, 100.f) };
-   HitTriangle triangle(nullptr, rgv);
+   HitTriangle triangle(nullptr, rgv, PhysicProfile::V10_9);
    triangle.CalcHitBBox();
 
    CollisionEvent coll;
@@ -425,7 +424,7 @@ TEST_CASE("A resting embedded ball stays put" * doctest::should_fail())
    harness.Start();
 
    HitBall ball;
-   ball.m_physics = harness.GetEngine();
+   ball.SetPhysics(harness.GetEngine());
    ball.m_d.m_pos = Vertex3Ds(570.f, 500.f, 25.f);
    ball.m_d.m_vel.SetZero();
    ball.m_coll.m_hitdistance = -2.f; // 2 VPU embedded at hit time
@@ -503,7 +502,7 @@ TEST_CASE("Ball-ball contact handling supports the resting ball")
    harness.Start();
 
    HitBall top;
-   top.m_physics = harness.GetEngine();
+   top.SetPhysics(harness.GetEngine());
    top.m_d.m_mass = 1.f;
    top.m_d.m_vel = Vertex3Ds(0.f, 0.f, -GRAVITYCONST * PHYS_FACTOR);
    top.m_angularmomentum.SetZero();
@@ -563,7 +562,7 @@ void MakeContactPair(PhysicsEngine *physics, HitBall &a, HitBall &b, CollisionEv
 {
    for (HitBall *ball : { &a, &b })
    {
-      ball->m_physics = physics;
+      ball->SetPhysics(physics);
       ball->m_d.m_mass = 1.f;
       ball->m_angularmomentum.SetZero();
    }
@@ -615,7 +614,7 @@ TEST_CASE("A free ball in slow contact with a locked ball takes the whole respon
    CHECK(a.m_d.m_vel.x == doctest::Approx(0.f));
 }
 
-#ifdef FIX_PHYSICS // relative contact friction
+// relative contact friction (kept in all profiles: ball-ball only improvement)
 TEST_CASE("Two balls rolling side by side are not braked by their contact")
 {
    PhysicsTestHarness harness;
@@ -643,7 +642,6 @@ TEST_CASE("Two balls rolling side by side are not braked by their contact")
    CHECK(b.m_d.m_vel.y == doctest::Approx(speed).epsilon(1e-6));
    CHECK(a.m_angularmomentum.x == doctest::Approx(-speed / a.m_d.m_radius * a.Inertia()).epsilon(1e-6));
 }
-#endif
 
 // ---------------------------------------------------------------------------
 // Each collider type defines its own contact window and receding-velocity
@@ -802,7 +800,7 @@ TEST_CASE("Slingshot kick does not scale with elasticity" * doctest::should_fail
    sling.m_scatter = 0.f;
 
    HitBall ball;
-   ball.m_physics = harness.GetEngine();
+   ball.SetPhysics(harness.GetEngine());
    ball.m_d.m_pos = Vertex3Ds(570.f, 500.f, 25.f); // mid segment: force shape = 0.5
    ball.m_d.m_vel = Vertex3Ds(100.f, 0.f, 0.f);
 
@@ -875,7 +873,7 @@ TEST_CASE("A resting ball is held by the flipper face")
    flipperPart->Release(); // owned by the table
 
    // Flipper at angle 0, pointing toward -y: face2 (face1=false) on the +x side.
-   HitFlipper flipper(Vertex2D(500.f, 500.f), 30.f, 15.f, 80.f, 0.f, 0.f, 0.f, 100.f, flipperPart);
+   HitFlipper flipper(Vertex2D(500.f, 500.f), 30.f, 15.f, 80.f, 0.f, 0.f, 0.f, 100.f, flipperPart, PhysicProfile::V10_9); // No engine: built for the harness default
    flipper.CalcHitBBox();
 
    const Vertex2D base(500.f, 500.f);
@@ -915,7 +913,7 @@ TEST_CASE("The flipper end cap provides the same contact support" * doctest::sho
    flipperPart->Release(); // owned by the table
 
    // End cap at angle 0 sits at base + (0, -flipperradius) = (500, 420).
-   HitFlipper flipper(Vertex2D(500.f, 500.f), 30.f, 15.f, 80.f, 0.f, 0.f, 0.f, 100.f, flipperPart);
+   HitFlipper flipper(Vertex2D(500.f, 500.f), 30.f, 15.f, 80.f, 0.f, 0.f, 0.f, 100.f, flipperPart, PhysicProfile::V10_9); // No engine: built for the harness default
    flipper.CalcHitBBox();
    const Vertex2D endCap(500.f, 420.f);
    const float touchDist = 15.f + DEFAULT_BALL_SIZE + 0.02f; // end radius + ball radius, touching
@@ -932,6 +930,78 @@ TEST_CASE("The flipper end cap provides the same contact support" * doctest::sho
       const BallS ball = MakeBallState(Vertex3Ds(endCap.x, endCap.y - touchDist, 25.f), Vertex3Ds(0.f, -0.05f, 0.f));
       CollisionEvent coll;
       CHECK(flipper.HitTestFlipperEnd(ball, 1.f, coll) >= 0.f); // bnv > 0 -> rejected today
+   }
+}
+
+// ---------------------------------------------------------------------------
+// The V10_9 profile replaced the flipper's rod-approximation inertia (m * flipr^2 / 3)
+// with the real flipper shape, which is smaller for tapered flippers. Under V10_8
+// the ball meets the rod response; under V10_9 it meets the shape-accurate inertia,
+// changing both the kick impulse and the flipper's recoil (tables tuned for the
+// legacy response keep it by selecting the 10.8 profile, vpinball/vpinball#4413).
+// ---------------------------------------------------------------------------
+
+TEST_CASE("Flipper ball kick uses the profile's inertia")
+{
+   for (const PhysicProfile profile : { PhysicProfile::V10_8, PhysicProfile::V10_9 })
+   {
+      PhysicsTestHarness harness;
+      harness.GetTable()->m_physicProfile = profile;
+
+      Flipper *const flipperPart = Flipper::COMCreate();
+      flipperPart->Init(0.f, 0.f, false);
+      flipperPart->SetName("TestFlipperKick");
+      flipperPart->m_d.m_friction = 0.f; // keep the exchange purely normal
+      harness.GetTable()->AddPart(flipperPart);
+      flipperPart->Release(); // owned by the table
+      harness.Start();
+      const PhysicProfile running = harness.GetEngine()->GetPhysicProfile(); // V10_9 in NEW_PHYSICS builds, whatever the table's
+
+      // Tapered flipper (30 -> 15 over 80): its shape inertia is measurably
+      // below the rod model's, so the two give visibly different kicks
+      HitFlipper flipper(Vertex2D(500.f, 500.f), 30.f, 15.f, 80.f, 0.f, 0.f, 0.f, 100.f, flipperPart, running);
+      flipper.SetPhysics(harness.GetEngine());
+
+      const Vertex2D F(flipper.m_flipperMover.m_zeroAngNorm); // face2 normal at angle 0
+      const Vertex2D T(F.y, -F.x); // face tangent toward the tip
+      const Vertex2D facePoint = Vertex2D(500.f, 500.f) + F * 30.f + T * (80.f * F.x * 0.5f); // middle of the face segment
+      const Vertex3Ds normal(F.x, F.y, 0.f);
+      const Vertex3Ds rF(facePoint.x - 500.f, facePoint.y - 500.f, 0.f);
+      const float arm = CrossProduct(rF, normal).z; // moment arm of a normal impulse
+      REQUIRE(arm > 0.f);
+
+      HitBall ball;
+      ball.SetPhysics(harness.GetEngine());
+      ball.m_d.m_mass = 1.f;
+      ball.m_d.m_radius = DEFAULT_BALL_SIZE;
+      ball.m_d.m_pos = Vertex3Ds(facePoint.x + F.x * ball.m_d.m_radius, facePoint.y + F.y * ball.m_d.m_radius, DEFAULT_BALL_SIZE);
+      ball.m_d.m_vel.SetZero();
+
+      // Flipper already mid swing, driving into the resting ball
+      const float omega = 0.005f; // keeps |bnv| below the 0.25 hit-event gate
+      flipper.m_flipperMover.m_angleSpeed = omega;
+      flipper.m_flipperMover.m_angularMomentum = omega * flipper.m_flipperMover.m_inertia;
+
+      CollisionEvent coll;
+      coll.m_ball = &ball;
+      coll.m_hitnormal = normal;
+      coll.m_hitdistance = 0.f;
+      flipper.Collide(coll);
+
+      // The mover's inertia is the profile's model: rod under V10_8, shape under V10_9
+      const float rodInertia = flipper.m_flipperMover.GetMass() * 80.f * 80.f / 3.f;
+      const float inertia = flipper.m_flipperMover.m_inertia;
+      CHECK(inertia == doctest::Approx(running == PhysicProfile::V10_9 ? flipper.m_flipperMover.GetMass() * flipper.m_flipperMover.m_inertiaShape : rodInertia));
+      // The two models must actually differ here. Under V10_8 both are the rod inertia, computed two ways that may differ by a rounding
+      REQUIRE((running == PhysicProfile::V10_8 || inertia < 0.99f * rodInertia));
+
+      const float bnv = -arm * omega;
+      const float epsilon = ElasticityWithFalloff(flipper.m_elasticity, flipper.m_elasticityFalloff, bnv);
+      const float impulse = -(1.f + epsilon) * bnv / (1.f + arm * arm / inertia);
+
+      CHECK(ball.m_d.m_vel.Dot(normal) == doctest::Approx(impulse).epsilon(0.01f));
+      // and the flipper recoils at the rate its own inertia gives it
+      CHECK(flipper.m_flipperMover.m_angleSpeed == doctest::Approx(omega - impulse * arm / inertia).epsilon(0.01f));
    }
 }
 
@@ -995,14 +1065,14 @@ TEST_CASE("A spinning ball keeps flipper contact support" * doctest::should_fail
    flipperPart->Release(); // owned by the table
    harness.Start();
 
-   HitFlipper flipper(Vertex2D(500.f, 500.f), 30.f, 15.f, 80.f, 0.f, 0.f, 0.f, 100.f, flipperPart);
+   HitFlipper flipper(Vertex2D(500.f, 500.f), 30.f, 15.f, 80.f, 0.f, 0.f, 0.f, 100.f, flipperPart, harness.GetEngine()->GetPhysicProfile());
    const Vertex2D F(flipper.m_flipperMover.m_zeroAngNorm);
    const Vertex3Ds normal(F.x, F.y, 0.f);
 
    // Same contact state for both balls: slowly approaching the flipper face.
    auto makeContact = [&](HitBall &ball)
    {
-      ball.m_physics = harness.GetEngine();
+      ball.SetPhysics(harness.GetEngine());
       ball.m_d.m_vel = -0.05f * normal;
 
       CollisionEvent coll;
@@ -1025,7 +1095,7 @@ TEST_CASE("A spinning ball keeps flipper contact support" * doctest::should_fail
    spinning.m_angularmomentum = Vertex3Ds(0.f, 0.f, 1000.f);
    makeContact(spinning);
    // The material surface point's centripetal acceleration is not gap
-   // acceleration: spin must not release the contact. Without FIX_PHYSICS normAcc >= 0
+   // acceleration: spin must not release the contact. Under V10_8 normAcc >= 0
    // early-outs before the approach-velocity cancellation, leaving the full
    // -0.05 approach velocity in place.
    CHECK(spinning.m_d.m_vel.Dot(normal) > -0.01f);

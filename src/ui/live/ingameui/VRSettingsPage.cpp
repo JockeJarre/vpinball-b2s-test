@@ -31,6 +31,13 @@ void VRSettingsPage::BuildPage()
       added.m_excludeFromDefault = true;
    };
 
+   AddItem(std::make_unique<InGameUIItem>(InGameUIItem::LabelType::Header, "Augmented Reality"s));
+
+   AddItem(std::make_unique<InGameUIItem>( //
+      Settings::m_propPlayerVR_UsePassthroughColor, //
+      [this]() { return m_player->m_renderer->m_vrApplyColorKey; }, //
+      [this](bool v) { m_player->m_renderer->m_vrApplyColorKey = v; }));
+
    AddItem(std::make_unique<InGameUIItem>(InGameUIItem::LabelType::Header, "Table Geometry (adjust table-specific dimensions)"s));
 
    addTableOnlyItem(std::make_unique<InGameUIItem>( //
@@ -102,10 +109,19 @@ void VRSettingsPage::BuildPage()
       }));
 
    if (m_player->m_vrDevice->IsOverridingLockbarWidth())
+   {
+      // While controller view centering measures the width every frame, the item shows it but does not edit it (the Cabinet Width Offset adjusts it)
+      if (m_player->m_vrDevice->IsMeasuringLockbarWidth())
+         AddItem(std::make_unique<InGameUIItem>(InGameUIItem::LabelType::Info, "Lockbar width is measured from the controllers while view centering is active"s));
       addGlobalOnlyItem(std::make_unique<InGameUIItem>( //
          Settings::m_propPlayer_LockbarWidth, 1.f, "%4.1f cm"s, //
          [this]() { return m_player->m_vrDevice->GetCustomLockbarWidth(); }, //
-         [this](float, float v) { m_player->m_vrDevice->SetCustomLockbarWidth(v); }));
+         [this](float, float v)
+         {
+            if (!m_player->m_vrDevice->IsMeasuringLockbarWidth())
+               m_player->m_vrDevice->SetCustomLockbarWidth(v);
+         }));
+   }
 
    addGlobalOnlyItem(std::make_unique<InGameUIItem>( //
       Settings::m_propPlayerVR_OverrideLockbarHeight, //
@@ -167,13 +183,6 @@ void VRSettingsPage::BuildPage()
             m_notifId = m_player->m_liveUI->PushNotification("Lock Feet to Ground was disabled as it is not compatible with seated play tilt"s, 5000, m_notifId);
          m_player->m_vrDevice->SetSeatedTilt(v);
       }));
-
-   AddItem(std::make_unique<InGameUIItem>(InGameUIItem::LabelType::Header, "Augmented Reality"s));
-
-   AddItem(std::make_unique<InGameUIItem>( //
-      Settings::m_propPlayerVR_UsePassthroughColor, //
-      [this]() { return m_player->m_renderer->m_vrApplyColorKey; }, //
-      [this](bool v) { m_player->m_renderer->m_vrApplyColorKey = v; }));
 
    AddItem(std::make_unique<InGameUIItem>(InGameUIItem::LabelType::Header, "Spatial Audio"s));
 
@@ -247,6 +256,13 @@ void VRSettingsPage::BuildPage()
       Settings::m_propPlayerVR_ControllerCabZOffset, 1.f, "%4.1f cm"s, //
       [this]() { return m_player->m_vrDevice->GetControllerCabZOffset(); }, //
       [this](float, float v) { m_player->m_vrDevice->SetControllerCabZOffset(v); }));
+
+   // The controller span is only used to measure the lockbar width when it is overridden
+   if (m_player->m_vrDevice->IsOverridingLockbarWidth())
+      addGlobalOnlyItem(std::make_unique<InGameUIItem>( //
+         Settings::m_propPlayerVR_ControllerCabWidthOffset, 1.f, "%4.1f cm"s, //
+         [this]() { return m_player->m_vrDevice->GetControllerCabWidthOffset(); }, //
+         [this](float, float v) { m_player->m_vrDevice->SetControllerCabWidthOffset(v); }));
 
    const auto& action = m_player->m_pininput.GetInputActions()[m_player->m_pininput.GetVRControllerViewCenteringActionId()];
    addGlobalOnlyItem(std::make_unique<InGameUIItem>(action->GetLabel(), "Select to add a new input binding which can be composed of multiple pressed button."s, action.get()));

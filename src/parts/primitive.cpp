@@ -256,7 +256,7 @@ void Primitive::PhysicSetup(PhysicsEngine* physics, const bool isUI)
          rgv3D[2].x = prog_vertices[i1].x;
          rgv3D[2].y = prog_vertices[i1].y;
          rgv3D[2].z = prog_vertices[i1].z;
-         HitTriangle* ht = new HitTriangle(this, rgv3D);
+         HitTriangle* ht = new HitTriangle(this, rgv3D, physics->GetPhysicProfile());
          if (ht->IsDegenerate())
             delete ht;
          else
@@ -290,7 +290,7 @@ void Primitive::PhysicSetup(PhysicsEngine* physics, const bool isUI)
          rgv3D[0] = m_vertices[i0];
          rgv3D[1] = m_vertices[i2];
          rgv3D[2] = m_vertices[i1];
-         HitTriangle* ht = new HitTriangle(this, rgv3D);
+         HitTriangle* ht = new HitTriangle(this, rgv3D, physics->GetPhysicProfile());
          if (ht->IsDegenerate())
             delete ht;
          else
@@ -386,6 +386,13 @@ const Matrix3D& Primitive::RecalculateMatrices()
                  * RTmatrix)
                  * Matrix3D::MatrixTranslate(m_d.m_vPosition.x, m_d.m_vPosition.y, m_d.m_vPosition.z);
    return m_fullMatrix;
+}
+
+void Primitive::OnMeshVerticesChanged()
+{
+   m_mesh.m_validBounds = false; // UpdateBounds keeps cached bounds otherwise
+   m_mesh.UpdateBounds();
+   // Not m_vertexBufferRegenerate: a static mesh has an immutable vertex buffer, the renderable reinit rebuilds it
 }
 
 // recalculate vertices for editor display & physics setup

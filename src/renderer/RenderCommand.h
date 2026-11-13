@@ -9,6 +9,24 @@
 #include "Shader.h"
 
 
+// Snapshot of a UI command list's geometry, recorded on the game thread and uploaded on the render thread at
+// submit time, once per frame by the list's first draw command: into BGFX's transient arena, or the list's
+// dynamic MeshBuffer when the arena lacks room. Each draw command then draws its index range from that upload
+struct UIListGeometry
+{
+   vector<uint8_t> vtx; // numVertices * sizeof(ImDrawVert)
+   vector<uint8_t> idx; // numIndices * sizeof(ImDrawIdx)
+   uint32_t numVertices = 0;
+   uint32_t numIndices = 0;
+   enum class Upload { None, Transient, Dynamic };
+   Upload upload = Upload::None; // Where this frame's snapshot went (reset by LiveUI with each new snapshot)
+#if defined(ENABLE_BGFX)
+   bgfx::TransientVertexBuffer tvb {}; // Upload::Transient only, valid until the end of the BGFX frame
+   bgfx::TransientIndexBuffer tib {};
+#endif
+};
+
+
 class RenderCommand final
 {
 public:
@@ -19,7 +37,7 @@ public:
 
    bool IsFullClear(const bool hasDepth) const;
    bool IsTransparent() const { return m_isTransparent; }
-   bool IsDrawCommand() const { return m_command == RC_DRAW_MESH || m_command == RC_DRAW_QUAD_PT || m_command == RC_DRAW_QUAD_PNT; }
+   bool IsDrawCommand() const { return m_command == RC_DRAW_MESH || m_command == RC_DRAW_TRANSIENT || m_command == RC_DRAW_QUAD_PT || m_command == RC_DRAW_QUAD_PNT; }
    bool IsDrawMeshCommand() const { return m_command == RC_DRAW_MESH; }
    RenderState GetRenderState() const { return m_renderState; }
    ShaderState* GetShaderState() const { return m_shaderState; }
@@ -37,6 +55,10 @@ public:
                 const int x1 = -1, const int y1 = -1, const int w1 = -1, const int h1 = -1,
                 const int x2 = -1, const int y2 = -1, const int w2 = -1, const int h2 = -1, const int srcLayer = -1, const int dstLayer = -1);
    void SetDrawMesh(Shader* shader, std::shared_ptr<MeshBuffer> mb, const RenderDevice::PrimitiveTypes type, const uint32_t startIndex, const uint32_t indexCount, const bool isTransparent, const float depth);
+#if defined(ENABLE_BGFX)
+   void SetDrawTransientMesh(Shader* shader, std::shared_ptr<UIListGeometry> geo, std::shared_ptr<MeshBuffer> mb, const RenderDevice::PrimitiveTypes type, const uint32_t startIndex,
+      const uint32_t indexCount, const bool isTransparent, const float depth);
+#endif
    void SetDrawTexturedQuad(Shader* shader, const Vertex3D_TexelOnly* vertices, const bool isTransparent = false, const float depth = 0.f);
    void SetDrawTexturedQuad(Shader* shader, const Vertex3D_NoTex2* vertices, const bool isTransparent = false, const float depth = 0.f);
 
@@ -50,6 +72,7 @@ private:
       RC_CLEAR,
       RC_COPY,
       RC_DRAW_MESH,
+      RC_DRAW_TRANSIENT,
       RC_DRAW_QUAD_PT,
       RC_DRAW_QUAD_PNT,
    };
@@ -85,4 +108,9 @@ private:
    unsigned int m_indicesCount = 0;
    unsigned int m_startIndex = 0;
    float m_depth = 0.f;
+
+// For RC_DRAW_TRANSIENT (LiveUI uploads: transient arena when it has room, m_mb as fallback)
+#if defined(ENABLE_BGFX)
+   std::shared_ptr<UIListGeometry> m_uiGeo;
+#endif
 };

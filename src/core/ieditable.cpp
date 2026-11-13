@@ -132,6 +132,8 @@ void IEditable::LoadSharedEditableField(const int tag, IObjectReader& reader)
    // shared member so the field is consumed (and the flag preserved) instead of reported as an
    // unhandled token.
    case FID(BGLS): m_desktopBackdrop = reader.AsBool(); break;
+   // Obsolete part extension record (10.8 dev builds): consume and drop it
+   case FID(EXTD): reader.AsObject([](const int, IObjectReader&) { return true; }, /*isSkippable*/ true); break;
    default:
    {
       PLOGE << "Unhandled token: " << (char)(tag & 0xFF) << (char)((tag >> 8) & 0xFF) << (char)((tag >> 16) & 0xFF) << (char)((tag >> 24) & 0xFF);

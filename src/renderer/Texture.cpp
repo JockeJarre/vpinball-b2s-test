@@ -3,6 +3,9 @@
 #include "core/stdafx.h"
 #include "Texture.h"
 
+#define XXH_INLINE_ALL
+#include "xxhash.h"
+
 #include "math/math.h"
 #include "renderer/Renderer.h"
 #include "renderer/TextureCompressor.h"
@@ -122,14 +125,16 @@ std::shared_ptr<BaseTexture> BaseTexture::CreateFromData(const void* data, const
    if (data == nullptr || size == 0)
       return nullptr;
 
-   // Try to load using fast JPG path via stbi if no texture resize must be triggered
-   if (maxTexDimension == 0 && !resizeOnLowMem)
+   // Fast JPEG path via stbi, when no resize is needed: within the max dimension (if any), and not tiny (FreeImage below upscales these)
+   if (!resizeOnLowMem)
    {
       int x, y, channels_in_file = 0;
-      const int ok = stbi_info_from_memory(static_cast<stbi_uc const *>(data), static_cast<int>(size), &x, &y, &channels_in_file); // Request stbi to convert image to BW, SRGB or SRGBA
+      const int ok = stbi_info_from_memory(static_cast<stbi_uc const *>(data), static_cast<int>(size), &x, &y, &channels_in_file);
       assert(channels_in_file != 2);
       assert(channels_in_file <= 4); // 2 or >4 should never happen for JPEGs (4 also not, but we handle it anyway)
-      unsigned char * const __restrict stbi_data = (ok && channels_in_file != 2 && channels_in_file <= 4) ?
+      const bool noResize = ok && x >= static_cast<int>(MIN_TEXTURE_SIZE) && y >= static_cast<int>(MIN_TEXTURE_SIZE)
+         && (maxTexDimension == 0 || (static_cast<unsigned int>(x) <= maxTexDimension && static_cast<unsigned int>(y) <= maxTexDimension));
+      unsigned char * const __restrict stbi_data = (noResize && channels_in_file != 2 && channels_in_file <= 4) ?
           stbi_load_from_memory(static_cast<stbi_uc const *>(data), static_cast<int>(size), &x, &y, &channels_in_file, channels_in_file) :
           nullptr;
       if (stbi_data) // will only enter this path for JPG files
@@ -574,8 +579,6 @@ std::shared_ptr<BaseTexture> BaseTexture::GetAlias(Format format) const
       std::shared_ptr<BaseTexture> alias = Convert(format);
       if (!m_isOpaqueDirty)
          alias->SetIsOpaque(IsOpaque());
-      if (!m_isMD5Dirty)
-         alias->SetMD5Hash(GetMD5Hash());
       m_aliases[format] = alias;
       return alias;
    }
@@ -661,6 +664,14 @@ std::shared_ptr<BaseTexture> BaseTexture::Convert(Format format) const
             copy_rgb_rgba(reinterpret_cast<uint16_t*>(tex->data()), reinterpret_cast<const uint16_t*>(datac()), (size_t)width() * height());
          }
          break;
+         case RGBA_FP32:
+         {
+            tex = BaseTexture::Create(m_width, m_height, RGBA_FP32);
+            if (tex == nullptr)
+               return nullptr;
+            half2float_rgb_rgba(reinterpret_cast<float*>(tex->data()), reinterpret_cast<const uint16_t*>(datac()), (size_t)width() * height());
+         }
+         break;
          default: break;
       }
       break;
@@ -668,15 +679,46 @@ std::shared_ptr<BaseTexture> BaseTexture::Convert(Format format) const
    case RGB_FP32:
       switch (format)
       {
-         case RGBA_FP32:
-            {
-            tex = BaseTexture::Create(m_width, m_height, RGBA_FP32);
-            if (tex == nullptr)
-               return nullptr;
-            copy_rgb_rgba(reinterpret_cast<float*>(tex->data()), reinterpret_cast<const float*>(datac()), (size_t)width() * height());
-         }
+      case RGB_FP16:
+      {
+         tex = BaseTexture::Create(m_width, m_height, RGB_FP16);
+         if (tex == nullptr)
+            return nullptr;
+         const float* const __restrict src = static_cast<const float*>(datac());
+         uint16_t* const __restrict dst = static_cast<uint16_t*>(tex->data());
+         const size_t e = (size_t)width() * height() * 3;
+         for (size_t i = 0; i < e; ++i)
+            dst[i] = float2half_noLUT(clamp(src[i], -65504.f, 65504.f));
+      }
+      break;
+      case RGBA_FP32:
+      {
+         tex = BaseTexture::Create(m_width, m_height, RGBA_FP32);
+         if (tex == nullptr)
+            return nullptr;
+         copy_rgb_rgba(reinterpret_cast<float*>(tex->data()), reinterpret_cast<const float*>(datac()), (size_t)width() * height());
+      }
          break;
          default: break;
+      }
+      break;
+
+   case RGBA_FP32:
+      switch (format)
+      {
+      case RGBA_FP16:
+      {
+         tex = BaseTexture::Create(m_width, m_height, RGBA_FP16);
+         if (tex == nullptr)
+            return nullptr;
+         const float* const __restrict src = static_cast<const float*>(datac());
+         uint16_t* const __restrict dst = static_cast<uint16_t*>(tex->data());
+         const size_t e = (size_t)width() * height() * 4;
+         for (size_t i = 0; i < e; ++i)
+            dst[i] = float2half_noLUT(clamp(src[i], -65504.f, 65504.f));
+      }
+      break;
+      default: break;
       }
       break;
 
@@ -696,8 +738,6 @@ std::shared_ptr<BaseTexture> BaseTexture::Convert(Format format) const
    {
       if (!m_isOpaqueDirty)
          tex->SetIsOpaque(IsOpaque());
-      if (!m_isMD5Dirty)
-         tex->SetMD5Hash(GetMD5Hash());
    }
 
    return tex;
@@ -854,17 +894,6 @@ SDL_Surface* BaseTexture::ToSDLSurface() const
    return format == SDL_PIXELFORMAT_UNKNOWN ? nullptr : SDL_CreateSurfaceFrom(m_width, m_height, format, const_cast<uint8_t*>(static_cast<const uint8_t*>(datac())), pitch());
 }
 
-void BaseTexture::UpdateMD5() const
-{
-   if (!m_isMD5Dirty)
-      return;
-   const std::lock_guard<std::mutex> lock(m_lazyMutex);
-   if (!m_isMD5Dirty) // Computed meanwhile by another thread
-      return;
-   generateMD5((uint8_t*)m_data, pitch() * height(), m_md5Hash);
-   m_isMD5Dirty = false;
-}
-
 void BaseTexture::UpdateOpaque() const
 {
    if (!m_isOpaqueDirty)
@@ -918,8 +947,6 @@ Texture* Texture::CreateFromObjectReader(IObjectReader& reader, PinTable* const 
    unsigned int height = 0;
    float alphaTestValue = static_cast<float>(-1.0 / 255.0);
    PinBinary* ppb = nullptr;
-   bool isMD5Dirty = true;
-   uint8_t md5Hash[16] = {};
    bool isOpaqueDirty = true;
    bool isOpaque = true;
    reader.AsObject(
@@ -936,10 +963,13 @@ Texture* Texture::CreateFromObjectReader(IObjectReader& reader, PinTable* const 
          case FID(WDTH): width = reader.AsInt(); break;
          case FID(HGHT): height = reader.AsInt(); break;
          case FID(ALTV): alphaTestValue = reader.AsFloat() * (float)(1.0 / 255.0); break;
+         // Deprecated: MD5 of the image, written by older versions. Read and discarded, as INME above
          case FID(MD5H):
+         {
+            uint8_t md5Hash[16];
             reader.AsRaw(md5Hash, 16);
-            isMD5Dirty = false;
             break;
+         }
          case FID(OPAQ):
             isOpaque = reader.AsBool();
             isOpaqueDirty = false;
@@ -1054,8 +1084,6 @@ Texture* Texture::CreateFromObjectReader(IObjectReader& reader, PinTable* const 
    tex->m_alphaTestValue = alphaTestValue;
    if (!isOpaqueDirty)
       tex->SetIsOpaque(isOpaque);
-   if (!isMD5Dirty)
-      tex->SetMD5Hash(md5Hash);
    return tex;
 }
 
@@ -1073,8 +1101,7 @@ Texture* Texture::CreateFromFile(const std::filesystem::path& filename, const bo
 
    Texture* tex = new Texture(TitleFromFilename(filename), ppb, imageBuffer->m_realWidth, imageBuffer->m_realHeight);
    tex->m_imageBuffer = imageBuffer;
-   tex->UpdateMD5();
-   tex->UpdateOpaque();
+   tex->UpdateOpaque(); // Cheap while the decoded image is alive
    return tex;
 }
 
@@ -1097,7 +1124,6 @@ void Texture::Save(IObjectWriter& writer, PinTable* pt) const
       m_ppb->Save(writer);
    }
    writer.WriteFloat(FID(ALTV), m_alphaTestValue * 255.0f);
-   writer.WriteRaw(FID(MD5H), GetMD5Hash(), 16);
    writer.WriteBool(FID(OPAQ), IsOpaque());
    writer.EndObject();
 }
@@ -1113,6 +1139,35 @@ bool Texture::IsHDR() const
    return (ext == ".exr") || (ext == ".hdr");
 }
 
+size_t BaseTexture::EstimateGPUSize(const Format format, const unsigned int width, const unsigned int height)
+{
+   // Bytes per texel of the GPU format (UncompressedBgfxFormat in Sampler.cpp), not of the bitmap: SRGB and SRGB565
+   // upload as RGBA8, RGB float as RGBA float, and RGB8 is padded to 4 bytes by most drivers
+   size_t texelBytes;
+   switch (format)
+   {
+   case BW: texelBytes = 1; break;
+   case RGB_FP16:
+   case RGBA_FP16: texelBytes = 8; break;
+   case RGB_FP32:
+   case RGBA_FP32: texelBytes = 16; break;
+   default: texelBytes = 4; break; // BW_FP32, RGB, SRGB, RGBA, SRGBA, SRGB565
+   }
+   // Base level plus ~1/3 for the mip chain, in 64 bits and clamped: a large float image overflows a 32-bit size_t
+   const uint64_t bytes = (static_cast<uint64_t>(texelBytes) * width * height * 4) / 3;
+   return static_cast<size_t>(std::min<uint64_t>(bytes, std::numeric_limits<size_t>::max()));
+}
+
+size_t BaseTexture::GetEstimatedGPUSize() const
+{
+#if defined(ENABLE_BGFX)
+   // Compressed data only exists with texture compression enabled, and is then what the sampler uploads
+   if (m_compressed)
+      return m_compressed->data.size() + m_compressed->GetMipSize(0); // Mip chain plus the no-mips alias
+#endif
+   return EstimateGPUSize(m_format, m_width, m_height);
+}
+
 size_t Texture::GetEstimatedGPUSize() const
 {
    std::shared_ptr<BaseTexture> buffer;
@@ -1120,27 +1175,37 @@ size_t Texture::GetEstimatedGPUSize() const
       const std::lock_guard<std::mutex> lock(m_imageBufferMutex);
       buffer = m_imageBuffer.lock();
    }
-   size_t estimatedSize;
    if (buffer)
-      estimatedSize = static_cast<size_t>(buffer->height()) * static_cast<size_t>(buffer->pitch());
-   else
-      estimatedSize = static_cast<size_t>(m_width) * static_cast<size_t>(m_height) * (IsHDR() ? 8 : 4); // 8 bytes per pixel for HDR (RGBA_FP16) and 4 bytes per pixel for non-HDR (RGBA)
-   // Add mipmaps (+1/3).
-   return (4 * estimatedSize) / 3;
+      return buffer->GetEstimatedGPUSize();
+   // Not decoded: HDR images decode to RGB halfs, the others to 8 bits per channel
+   return BaseTexture::EstimateGPUSize(IsHDR() ? BaseTexture::RGB_FP16 : BaseTexture::SRGBA, m_width, m_height);
 }
 
 std::shared_ptr<const BaseTexture> Texture::GetRawBitmap(bool resizeOnLowMem, unsigned int maxTexDimension) const
 {
+   // The decoded image is shared while alive, with the requests it fits: within the requested max dimension, and not smaller than
+   // needed (unless downsized on low memory, for a request allowing it). Otherwise a smaller request (f.e. on GPU memory pressure)
+   // would get the full size image back, and a full size request a downsized one
+   const auto isMatching = [resizeOnLowMem, maxTexDimension](const BaseTexture &buffer)
+   {
+      const unsigned int size = max(buffer.width(), buffer.height());
+      if (maxTexDimension > 0 && size > maxTexDimension)
+         return false;
+      if (buffer.m_resizedOnLowMem)
+         return resizeOnLowMem;
+      return (buffer.width() >= buffer.m_realWidth && buffer.height() >= buffer.m_realHeight) // Full size (upscaled if tiny)
+         || size == maxTexDimension; // Downsized to the requested max dimension (applied to the largest side)
+   };
    {
       const std::lock_guard<std::mutex> lock(m_imageBufferMutex);
-      if (auto buffer = m_imageBuffer.lock())
+      if (auto buffer = m_imageBuffer.lock(); buffer && isMatching(*buffer))
          return buffer;
    }
    // Decode without holding m_imageBufferMutex, so that the other accessors do not wait for it
    const std::lock_guard<std::mutex> decodeLock(m_decodeMutex);
    {
       const std::lock_guard<std::mutex> lock(m_imageBufferMutex);
-      if (auto buffer = m_imageBuffer.lock()) // Decoded meanwhile by another thread
+      if (auto buffer = m_imageBuffer.lock(); buffer && isMatching(*buffer)) // Decoded meanwhile by another thread
          return buffer;
    }
    //PLOGD << "Decoding image " << m_name;
@@ -1169,30 +1234,23 @@ std::shared_ptr<const BaseTexture> Texture::GetRawBitmap(bool resizeOnLowMem, un
    return buffer;
 }
 
-void Texture::UpdateMD5() const
+uint64_t Texture::GetContentHash() const
 {
-   if (!m_isMD5Dirty)
-      return;
-   uint8_t md5[16];
-   generateMD5(m_ppb->m_buffer.data(), m_ppb->m_buffer.size(), md5);
+   if (!m_isContentHashDirty)
+      return m_contentHash;
+   const uint64_t hash = XXH3_64bits(m_ppb->m_buffer.data(), m_ppb->m_buffer.size()); // Outside the lock, not to block the other accessors
    const std::lock_guard<std::mutex> lock(m_imageBufferMutex);
-   if (m_isMD5Dirty) // Otherwise computed meanwhile by another thread, and maybe already read without locking
-      SetMD5HashLocked(md5);
+   if (m_isContentHashDirty) // Otherwise computed meanwhile by another thread, and maybe already read without locking
+   {
+      m_contentHash = hash;
+      m_isContentHashDirty = false;
+   }
+   return m_contentHash;
 }
 
-void Texture::SetMD5Hash(uint8_t* md5) const
+bool Texture::HasSameContent(const Texture &other) const
 {
-   const std::lock_guard<std::mutex> lock(m_imageBufferMutex);
-   SetMD5HashLocked(md5);
-}
-
-void Texture::SetMD5HashLocked(uint8_t* md5) const
-{
-   memcpy(m_md5Hash, md5, sizeof(m_md5Hash));
-   m_isMD5Dirty = false;
-   auto buffer = m_imageBuffer.lock();
-   if (buffer)
-      buffer->SetMD5Hash(md5);
+   return GetFileSize() == other.GetFileSize() && GetContentHash() == other.GetContentHash() && memcmp(GetFileRaw(), other.GetFileRaw(), GetFileSize()) == 0;
 }
 
 void Texture::UpdateOpaque() const

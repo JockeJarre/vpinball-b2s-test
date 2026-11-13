@@ -2,6 +2,8 @@
 
 #pragma once
 
+#include "imgui/imgui.h"
+
 namespace VPX::EditorUI
 {
 
@@ -25,13 +27,25 @@ public:
    float GetStatusBarHeight() const { return m_statusBarHeight; }
    // Draws the status bar (context key hints, last operation report). Called after the areas so it stays on top of them
    void RenderStatusBar(bool showFullUI);
+   // Opens the Edit > Preferences window
+   void OpenPreferences() { m_preferencesOpen = true; }
+   enum class ChevronDir
+   {
+      Down,
+      Right
+   };
+   // Line chevron (Lucide style, replaces ImGui's filled triangles), centered at c, half width 'size'
+   static void DrawChevron(ImDrawList *drawList, const ImVec2 &center, ChevronDir dir, float size, ImU32 color);
 
 private:
    void RenderMenuBar();
+   void RenderPreferences(); // The Edit > Preferences window: a page rail on the left, the page content on the right
 
    EditorUI &m_editor;
    float m_menuBarHeight = 0.0f;
    float m_statusBarHeight = 0.0f;
+   bool m_preferencesOpen = false;
+   int m_preferencesPage = 0; // Selected page of the Preferences window's rail
 };
 
 }

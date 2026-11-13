@@ -10,7 +10,19 @@
 #include "parts/Collection.h"
 #include "parts/Material.h"
 #include "parts/Sound.h"
+#include "parts/bumper.h"
+#include "parts/decal.h"
+#include "parts/flipper.h"
+#include "parts/gate.h"
+#include "parts/hittarget.h"
+#include "parts/kicker.h"
+#include "parts/plunger.h"
 #include "parts/primitive.h"
+#include "parts/ramp.h"
+#include "parts/rubber.h"
+#include "parts/spinner.h"
+#include "parts/surface.h"
+#include "parts/trigger.h"
 #include "physics/PhysicsEngine.h"
 #include "renderer/Texture.h"
 #include "ui/live/EditorUI.h"
@@ -18,7 +30,9 @@
 #include "ui/live/LiveUI.h"
 #include "utils/color.h"
 
+#include "ui/live/IconsLucide.h"
 #include "PropertyPane.h"
+#include "ui/live/ImGuiHelpers.h"
 
 namespace VPX::EditorUI
 {
@@ -30,12 +44,30 @@ PropertiesPanel::PropertiesPanel(EditorUI &editor)
 
 PropertiesPanel::~PropertiesPanel() = default;
 
+string PropertiesPanel::PartMaterial(const IEditable *part)
+{
+   switch (part->GetItemType())
+   {
+   case eItemPrimitive: return static_cast<const Primitive *>(part)->m_d.m_szMaterial;
+   case eItemRamp: return static_cast<const Ramp *>(part)->m_d.m_szMaterial;
+   case eItemSurface: return static_cast<const Surface *>(part)->m_d.m_szTopMaterial;
+   case eItemDecal: return static_cast<const Decal *>(part)->m_d.m_szMaterial;
+   case eItemFlipper: return static_cast<const Flipper *>(part)->m_d.m_szMaterial;
+   case eItemHitTarget: return static_cast<const HitTarget *>(part)->m_d.m_szMaterial;
+   case eItemPlunger: return static_cast<const Plunger *>(part)->m_d.m_szMaterial;
+   case eItemRubber: return static_cast<const Rubber *>(part)->m_d.m_szMaterial;
+   case eItemSpinner: return static_cast<const Spinner *>(part)->m_d.m_szMaterial;
+   case eItemKicker: return static_cast<const Kicker *>(part)->m_d.m_szMaterial;
+   case eItemTrigger: return static_cast<const Trigger *>(part)->m_d.m_szMaterial;
+   case eItemGate: return static_cast<const Gate *>(part)->m_d.m_szMaterial;
+   case eItemBumper: return static_cast<const Bumper *>(part)->m_d.m_szCapMaterial;
+   default: return string();
+   }
+}
+
 void PropertiesPanel::RenderPane(const AreaRect &rect, const int leafId)
 {
    EditorUI &editor = m_editor;
-   if (editor.m_table->IsLocked())
-      return;
-
    char name[32];
    snprintf(name, sizeof(name), "##Pane%d", leafId);
    ImGui::SetNextWindowPos(ImVec2(rect.x0, rect.y0));
@@ -43,8 +75,10 @@ void PropertiesPanel::RenderPane(const AreaRect &rect, const int leafId)
    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(4.0f * editor.m_liveUI.GetDPI(), 4.0f * editor.m_liveUI.GetDPI()));
    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
+   // The vertical scrollbar is always drawn so that its space is always reserved, keeping the pane's layout stable
    ImGui::Begin(name, nullptr,
-      ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoNavFocus);
+      ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoNavFocus
+         | ImGuiWindowFlags_AlwaysVerticalScrollbar);
    ImGui::PushID(leafId);
    editor.RenderAreaTypeButton(leafId);
    ImGui::Separator();
@@ -70,6 +104,19 @@ void PropertiesPanel::RenderPane(const AreaRect &rect, const int leafId)
    case EditorUI::Units::Metric: props.SetLengthUnit(PropertyPane::Unit::Millimeters); break;
    case EditorUI::Units::Imperial: props.SetLengthUnit(PropertyPane::Unit::Inches); break;
    }
+   if (editor.m_table->IsLocked())
+   {
+      // A locked table is read-only: the pane still shows its (disabled) properties so that the header's lock toggle can unlock it
+      TableProperties(props);
+      props.EndEditScope();
+      if (props.GetModifiedField() > 0)
+         editor.m_table->SetNonUndoableDirty(SaveDirtyState::Dirty);
+      RenderPopups();
+      ImGui::PopID();
+      ImGui::End();
+      ImGui::PopStyleVar(3);
+      return;
+   }
    if (uniformPartSel)
    {
       vector<IEditable *> coParts;
@@ -93,9 +140,13 @@ void PropertiesPanel::RenderPane(const AreaRect &rect, const int leafId)
                props.SetShowStartup(!is_live);
                switch (editor.m_selection.GetType())
                {
-               case Selection::S_NONE: TableProperties(props); break;
+               case Selection::S_NONE:
+                  TableProperties(props);
+                  props.EndEditScope();
+                  break;
                case Selection::S_EDITABLE:
                   editor.m_selection.GetPart()->UpdatePropertyPane(props);
+                  props.EndEditScope();
                   if (props.GetModifiedField() > 0)
                      RefreshEditedParts(props);
                   break;
@@ -124,7 +175,10 @@ void PropertiesPanel::RenderPane(const AreaRect &rect, const int leafId)
    {
       switch (editor.m_selection.GetType())
       {
-      case Selection::S_NONE: TableProperties(props); break;
+      case Selection::S_NONE:
+         TableProperties(props);
+         props.EndEditScope();
+         break;
       case Selection::S_EDITABLE:
       {
          IEditable *const editable = editor.m_selection.GetPart()->GetEditable();
@@ -151,6 +205,7 @@ void PropertiesPanel::RenderPane(const AreaRect &rect, const int leafId)
                });
          }
          editor.m_selection.GetPart()->UpdatePropertyPane(props);
+         props.EndEditScope();
          // A renamed surface or ramp retargets the parts placed on it, recorded in the same undo record
          editor.m_table->UpdateSurfaceReferences(editable, nameBefore, [&editor](IEditable *part) { editor.m_undo.MarkForUndo(part); });
          editor.m_undo.EndUndo();
@@ -235,7 +290,7 @@ void PropertiesPanel::TableProperties(PropertyPane &props)
 {
    EditorUI &editor = m_editor;
    PinTable *table = props.GetEditedPart<PinTable>(editor.m_table);
-   props.Header("Table"s, [table]() { return table->GetName(); }, [table](const string &v) { table->SetName(v); });
+   props.TableHeader(table);
 
    if (props.BeginSection("Visuals"s))
    {
@@ -333,6 +388,11 @@ void PropertiesPanel::TableProperties(PropertyPane &props)
 
    if (props.BeginSection("Physics"s))
    {
+      props.Combo<PinTable>(
+         table, "Physics Profile"s, vector<string> { "10.8"s, "10.9"s }, //
+         [](const PinTable *table) { return (int)table->m_physicProfile; }, //
+         [](PinTable *table, int v) { table->m_physicProfile = (PhysicProfile)v; },
+         "Physics engine behavior: 10.8 reproduces VPX 10.8 physics, 10.9 enables the corrected physics (see physconst.h). A change applies the next time the table is played");
       props.Separator("Physics Constants"s);
       props.InputFloat<PinTable>(
          table, "Gravity Constant"s, //
@@ -849,7 +909,8 @@ void PropertiesPanel::SoundProperties(PropertyPane &props, VPX::Sound *sound)
    ImGui::EndDisabled();
 
    ImGui::BeginDisabled(audioPlayer == nullptr);
-   if (ImGui::Button(isPlaying ? (ICON_FK_STOP " Stop"s).c_str() : (ICON_FK_PLAY " Play"s).c_str()))
+   const string playStopLabel = isPlaying ? ICON_LC_SQUARE " Stop"s : ICON_LC_PLAY " Play"s;
+   if (IconButtonInk(playStopLabel.c_str(), "##PlayStop"))
    {
       if (isPlaying)
       {
@@ -1071,7 +1132,7 @@ void PropertiesPanel::CollectionProperties(PropertyPane &props, Collection *coll
       // Members, in the collection's order which is the order exposed to scripts
       if (members.empty())
          ImGui::TextDisabled("Empty collection");
-      const float buttonWidth = ImGui::CalcTextSize(ICON_FK_ARROW_UP).x + ImGui::GetStyle().FramePadding.x * 2.0f;
+      const float buttonWidth = IconButtonInkSize(ICON_LC_ARROW_UP).x;
       const float buttonsX = ImGui::GetContentRegionAvail().x - 3.f * buttonWidth - 2.f * ImGui::GetStyle().ItemSpacing.x;
       int moveIndex = -1, removeIndex = -1;
       for (int i = 0; i < static_cast<int>(members.size()); i++)
@@ -1090,20 +1151,20 @@ void PropertiesPanel::CollectionProperties(PropertyPane &props, Collection *coll
             ImGui::SetTooltip("%s", LocalString(EditableRegistry::GetTypeNameStringID(member->GetItemType())).m_szbuffer);
          ImGui::SameLine(buttonsX);
          ImGui::BeginDisabled(i == 0);
-         if (ImGui::SmallButton(ICON_FK_ARROW_UP))
+         if (SmallIconButtonInk(ICON_LC_ARROW_UP, "##MoveUp"))
             moveIndex = i - 1;
          ImGui::EndDisabled();
          if (ImGui::IsItemHovered())
             ImGui::SetTooltip("Move up");
          ImGui::SameLine();
          ImGui::BeginDisabled(i == static_cast<int>(members.size()) - 1);
-         if (ImGui::SmallButton(ICON_FK_ARROW_DOWN))
+         if (SmallIconButtonInk(ICON_LC_ARROW_DOWN, "##MoveDown"))
             moveIndex = i;
          ImGui::EndDisabled();
          if (ImGui::IsItemHovered())
             ImGui::SetTooltip("Move down");
          ImGui::SameLine();
-         if (ImGui::SmallButton(ICON_FK_TIMES))
+         if (SmallIconButtonInk(ICON_LC_X, "##RemoveMember"))
             removeIndex = i;
          if (ImGui::IsItemHovered())
             ImGui::SetTooltip("Remove from collection");
@@ -1185,6 +1246,22 @@ void PropertiesPanel::RenderPopups()
    }
 }
 
+// Replaces 'old' by the image loaded from 'path', keeping 'old's name. When the file holds the
+// very same content, 'old' is kept and returned; when it fails to load, nullptr is returned.
+// 'dup' is set to another table image with the same content, when there is one.
+static Texture *ReimportImageFile(PinTable *table, Texture *const old, const std::filesystem::path &path, Texture **dup = nullptr)
+{
+   if (dup != nullptr)
+      *dup = nullptr;
+   Texture *const image = Texture::CreateFromFile(path);
+   if (image == nullptr)
+      return nullptr;
+   if (dup != nullptr && !image->HasSameContent(*old))
+      *dup = table->FindImageByContent(image);
+   image->m_name = old->m_name;
+   return table->ReImportImage(old, image);
+}
+
 void PropertiesPanel::ImageActions(PropertyPane &props)
 {
    EditorUI &editor = m_editor;
@@ -1205,17 +1282,25 @@ void PropertiesPanel::ImageActions(PropertyPane &props)
    if (m_pendingImageImport && !m_pendingImageImport->empty())
    {
       vector<Texture *> imported;
+      int reused = 0;
       for (const string &file : *m_pendingImageImport)
-         if (Texture *const tex = table->ImportImage(PathFromUTF8(file), ""s))
+         if (Texture *const loaded = Texture::CreateFromFile(PathFromUTF8(file)))
+         {
+            Texture *const tex = table->ImportImage(loaded);
+            reused += (tex != loaded) ? 1 : 0; // A file identical to an existing image is not imported again: the existing image is used
             imported.push_back(tex);
+         }
       g_settingsService.GetAppSettings().SetRecentDir_ImageDir(PathToString(PathFromUTF8(m_pendingImageImport->front()).parent_path()), false);
       m_pendingImageImport = nullptr;
+      if (reused > 0)
+         m_editor.m_liveUI.PushNotification(std::to_string(reused) + " file(s) were already in the table: the existing image(s) were used"s, 8000);
       if (!imported.empty())
       {
          sel = imported;
          editor.m_selection = Selection(imported.back());
          editor.m_outlinerImageAnchor = imported.back();
-         table->SetNonUndoableDirty(SaveDirtyState::Dirty);
+         if (reused < static_cast<int>(imported.size()))
+            table->SetNonUndoableDirty(SaveDirtyState::Dirty);
       }
       else
          m_actionStatus = "Failed to import the selected file(s)"s;
@@ -1228,14 +1313,23 @@ void PropertiesPanel::ImageActions(PropertyPane &props)
       m_pendingImageReimportTarget = nullptr;
       if (old != nullptr)
       {
-         // ImportImage replaces and deletes the image that already uses this name
-         if (Texture *const tex = table->ImportImage(PathFromUTF8(file), old->m_name))
-         {
-            replaceImage(old, tex);
-            table->SetNonUndoableDirty(SaveDirtyState::Dirty);
-         }
-         else
+         // ReimportImageFile replaces and deletes the old image, unless the file content is unchanged
+         Texture *dup = nullptr;
+         Texture *const tex = ReimportImageFile(table, old, PathFromUTF8(file), &dup);
+         if (tex == nullptr)
             m_actionStatus = "Failed to reimport '"s + file + '\'';
+         else
+         {
+            if (tex != old)
+            {
+               replaceImage(old, tex);
+               table->SetNonUndoableDirty(SaveDirtyState::Dirty);
+            }
+            else
+               m_editor.m_liveUI.PushNotification("'"s + old->m_name + "' is already up to date"s, 8000);
+            if (dup != nullptr)
+               m_editor.m_liveUI.PushNotification("'"s + tex->m_name + "' is now a duplicate of image '"s + dup->m_name + "'"s, 8000);
+         }
          g_settingsService.GetAppSettings().SetRecentDir_ImageDir(PathToString(PathFromUTF8(file).parent_path()), false);
       }
    }
@@ -1332,17 +1426,36 @@ void PropertiesPanel::ImageActions(PropertyPane &props)
             {
                EditorUI &editor = m_editor;
                const vector<Texture *> sel = editor.m_multiSelImages;
-               int missing = 0;
+               int missing = 0, unchanged = 0, replaced = 0, duplicated = 0;
                for (Texture *const old : sel)
                   if (!std::filesystem::exists(old->GetFilePath()))
                      missing++;
-                  else if (Texture *const tex = m_editor.m_table->ImportImage(old->GetFilePath(), old->m_name)) // On failure, the old image is kept
-                     replaceImage(old, tex);
                   else
-                     missing++;
+                  {
+                     Texture *dup = nullptr;
+                     if (Texture *const tex = ReimportImageFile(m_editor.m_table, old, old->GetFilePath(), &dup)) // On failure, the old image is kept
+                     {
+                        if (tex != old)
+                        {
+                           replaceImage(old, tex);
+                           replaced++;
+                           if (dup != nullptr)
+                              duplicated++;
+                        }
+                        else
+                           unchanged++;
+                     }
+                     else
+                        missing++;
+                  }
                if (missing > 0)
                   m_actionStatus = std::to_string(missing) + " file(s) not found or failed to load";
-               m_editor.m_table->SetNonUndoableDirty(SaveDirtyState::Dirty);
+               else if (unchanged > 0)
+                  m_actionStatus = std::to_string(unchanged) + " image(s) already up to date"s;
+               if (duplicated > 0)
+                  m_editor.m_liveUI.PushNotification(std::to_string(duplicated) + " image(s) are now duplicates of existing images"s, 8000);
+               if (replaced > 0)
+                  m_editor.m_table->SetNonUndoableDirty(SaveDirtyState::Dirty);
             });
       }
 
@@ -1378,17 +1491,36 @@ void PropertiesPanel::ImageActions(PropertyPane &props)
       if (ImGui::Button("Reimport All"))
       {
          const vector<Texture *> all = table->m_vimage;
-         int missing = 0;
+         int missing = 0, unchanged = 0, replaced = 0, duplicated = 0;
          for (Texture *const old : all)
             if (!std::filesystem::exists(old->GetFilePath()))
                missing++;
-            else if (Texture *const tex = table->ImportImage(old->GetFilePath(), old->m_name)) // On failure, the old image is kept
-               replaceImage(old, tex);
             else
-               missing++;
+            {
+               Texture *dup = nullptr;
+               if (Texture *const tex = ReimportImageFile(table, old, old->GetFilePath(), &dup)) // On failure, the old image is kept
+               {
+                  if (tex != old)
+                  {
+                     replaceImage(old, tex);
+                     replaced++;
+                     if (dup != nullptr)
+                        duplicated++;
+                  }
+                  else
+                     unchanged++;
+               }
+               else
+                  missing++;
+            }
          if (missing > 0)
             m_actionStatus = std::to_string(missing) + " file(s) not found or failed to load";
-         table->SetNonUndoableDirty(SaveDirtyState::Dirty);
+         else if (unchanged > 0)
+            m_actionStatus = std::to_string(unchanged) + " image(s) already up to date"s;
+         if (duplicated > 0)
+            m_editor.m_liveUI.PushNotification(std::to_string(duplicated) + " image(s) are now duplicates of existing images"s, 8000);
+         if (replaced > 0)
+            table->SetNonUndoableDirty(SaveDirtyState::Dirty);
       }
       ImGui::EndDisabled();
 

@@ -24,6 +24,7 @@
 #include "utils/color.h"
 
 #include "ThreadPool.h"
+#include "utils/denormals.h"
 
 
 #ifdef __LIBVPINBALL__
@@ -118,6 +119,7 @@ Renderer::Renderer(PinTable* const table, VPX::Window* wnd, VideoSyncMode& syncM
    view->m_renderSourceWidth = wnd->GetPixelWidth();
    view->m_renderSourceHeight = wnd->GetPixelHeight();
    const float AAfactor = Settings::GetPlayer_AAFactor_Property()->GetValid(m_table->GetSettings().GetPlayer_AAFactor());
+   view->m_aaFactor = AAfactor;
    const int renderWidthAA = (int)((float)view->m_renderWidth * AAfactor);
    const int renderHeightAA = (int)((float)view->m_renderHeight * AAfactor);
 
@@ -164,6 +166,17 @@ Renderer::Renderer(PinTable* const table, VPX::Window* wnd, VideoSyncMode& syncM
    // These three assets are shipped with the application, so failing to load one means a broken install rather than
    // a table problem. So no fall back, rather fail/crash on startup
    std::shared_ptr<BaseTexture> ballTex = std::shared_ptr<BaseTexture>(BaseTexture::CreateFromFile(g_app->m_fileLocator.GetAppPath(FileLocator::AppSubFolder::Assets, "BallEnv.exr")));
+#ifdef ENABLE_BGFX
+   // WebGPU can only filter 32 bit float textures with the optional 'float32-filterable' feature, so clamp
+   // extreme HDR environments to FP16 to keep envmap filtering working everywhere
+   if (bgfx::getRendererType() == bgfx::RendererType::Enum::WebGPU)
+   {
+      if (ballTex->m_format == BaseTexture::RGB_FP32)
+         ballTex = ballTex->Convert(BaseTexture::RGB_FP16);
+      else if (ballTex->m_format == BaseTexture::RGBA_FP32)
+         ballTex = ballTex->Convert(BaseTexture::RGBA_FP16);
+   }
+#endif
    m_ballEnvSampler = std::make_shared<Sampler>(m_renderDevice, "Ball Env"s, /*m_renderDevice->OrFallback(*/ ballTex /*)*/, false);
    ballTex = nullptr;
 
@@ -175,6 +188,17 @@ Renderer::Renderer(PinTable* const table, VPX::Window* wnd, VideoSyncMode& syncM
    std::shared_ptr<const BaseTexture> envTex = /*m_renderDevice->OrFallback(*/
       tableEnv ? tableEnv->GetRawBitmap(false, 0)
                : std::shared_ptr<BaseTexture>(BaseTexture::CreateFromFile(g_app->m_fileLocator.GetAppPath(FileLocator::AppSubFolder::Assets, "EnvMap.webp"))) /*)*/;
+#ifdef ENABLE_BGFX
+   // WebGPU can only filter 32 bit float textures with the optional 'float32-filterable' feature, so clamp
+   // extreme HDR environments to FP16 to keep envmap filtering working everywhere
+   if (bgfx::getRendererType() == bgfx::RendererType::Enum::WebGPU)
+   {
+      if (envTex->m_format == BaseTexture::RGB_FP32)
+         envTex = envTex->Convert(BaseTexture::RGB_FP16);
+      else if (envTex->m_format == BaseTexture::RGBA_FP32)
+         envTex = envTex->Convert(BaseTexture::RGBA_FP16);
+   }
+#endif
    m_envSampler = std::make_shared<Sampler>(m_renderDevice, "Table Env"s, envTex, false);
 
    PLOGI << "Computing environment map radiance"; // For profiling
@@ -589,6 +613,7 @@ std::shared_ptr<BaseTexture> Renderer::EnvmapPrecalc(const std::shared_ptr<const
          pool.enqueue_block(
             [y, rad_envmap, rad_format, rad_env_xres, rad_env_yres, envmap, env_format, env_xres, env_yres]
             {
+               set_denormals_flush_to_zero_once(); // to avoid slowdown due to denormals
                for (unsigned int x = 0; x < rad_env_xres; ++x)
                {
                   // transfo from envmap to normal direction, at the texel center where the shaders look it up
@@ -1392,13 +1417,14 @@ void Renderer::RenderItem(IEditable* const editable, bool isNoBackdrop)
    const bool isWireframe = m_activeView->m_shadeMode != ShadeMode::Default && (m_render_mask & (UI_FILL | UI_EDGES | LIGHT_BUFFER | REFLECTION_PASS)) == 0;
    if (editable->GetIRenderable() == nullptr // Not renderable
       || (editable->m_desktopBackdrop && isNoBackdrop) // Don't render backdrop items in reflections or VR & cabinet modes
-      || (editable->GetPartGroup() != nullptr && ((editable->GetPartGroup()->GetPlayerModeVisibilityMask() & m_activeView->m_visibilityMask) == 0))) // Apply player mode visibility mask
+      || (!m_activeView->m_editorView // Apply player mode visibility mask (superseded by the editor's UI visibility in editor views)
+         && editable->GetPartGroup() != nullptr && (editable->GetPartGroup()->GetPlayerModeVisibilityMask() & m_activeView->m_visibilityMask) == 0))
       return;
 
    const PartGroupData::SpaceReference spaceReference = editable->GetPartGroup() ? editable->GetPartGroup()->GetReferenceSpace() : PartGroupData::SpaceReference::SR_PLAYFIELD;
    SetSpaceReference(spaceReference, false);
 
-   // Parts flagged as "Show in Editor" are rendered shaded, even when the part group visibility mask would hide them
+   // Parts flagged as "Show in Editor" are rendered shaded, even in wireframe shade modes
    if (!isWireframe || editable->IsShownInEditor())
    {
       editable->GetIRenderable()->Render(m_render_mask);
@@ -1420,6 +1446,14 @@ void Renderer::DisableStaticPrePass(const bool disable)
       view->m_disableStaticPrepass += disable ? 1 : -1;
       view->m_isStaticPrepassDirty |= wasUsingStaticPrepass != view->IsUsingStaticPrepass();
    }
+}
+
+void Renderer::MarkStaticsDirty()
+{
+   // The accumulated static part prerender (and the static render probes, which are dirtied with it) is
+   // stale: the views re-accumulate it on their next render. Views not using the prepass ignore the flag.
+   for (RenderView* view : m_renderViews)
+      view->m_isStaticPrepassDirty = true;
 }
 
 
@@ -2170,13 +2204,18 @@ void Renderer::RenderAncillaryWindow(VPXWindowId window, const VPX::RenderOutput
       // to the refresh rate of their own display: rendering them at the playfield rate would only spend
       // CPU and GPU on frames the display can never show. Skipping before binding the swapchain also
       // skips its present for this frame. A swapped backbuffer forces an immediate render.
+      // The render deadline advances by one display frame per render, and a render may come up to half a display frame early:
+      // the window keeps its display rate on average (e.g. 60 fps along a 144 Hz playfield) and timing jitter does not skip frames
+      // at equal rates. After a stall, the deadline restarts from now, and forced renders keep it at most 1.5 display frames ahead
       VPX::Window* const wnd = output.GetWindow();
       RenderTarget* const backBuffer = wnd != nullptr ? wnd->GetBackBuffer() : nullptr;
-      const uint64_t frameInterval = wnd != nullptr ? static_cast<uint64_t>(950000. / static_cast<double>(wnd->GetRefreshRate())) : 0;
-      const uint64_t now = usec();
-      if (!isAdjusted && !wasAdjusted && backBuffer != nullptr && backBuffer == m_ancillaryWndLastRT[window] && (now - m_ancillaryWndLastRenderTime[window]) < frameInterval)
+      const double refreshRate = wnd != nullptr ? wnd->GetRefreshRate() : 0.;
+      const int64_t frameInterval = refreshRate > 0. ? static_cast<int64_t>(1000000. / refreshRate) : 0; // Unknown display rate: no throttling
+      const int64_t now = static_cast<int64_t>(usec());
+      int64_t& nextRenderTime = m_ancillaryWndNextRenderTime[window];
+      if (!isAdjusted && !wasAdjusted && backBuffer != nullptr && backBuffer == m_ancillaryWndLastRT[window] && now + frameInterval / 2 < nextRenderTime)
          return;
-      m_ancillaryWndLastRenderTime[window] = now;
+      nextRenderTime = clamp(nextRenderTime + frameInterval, now + frameInterval / 2, now + frameInterval + frameInterval / 2);
       m_ancillaryWndLastRT[window] = backBuffer;
    }
 

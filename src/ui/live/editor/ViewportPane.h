@@ -3,12 +3,14 @@
 #pragma once
 
 #include "EditorAreaView.h"
+#include "ViewportSidebar.h"
 #include "parts/EditorUIPart.h" // ViewMode
 #include "imguizmo/ImGuizmo.h"
 #include "math/matrix.h"
 #include "renderer/Renderer.h" // Renderer::ShadeMode
 
 class DragPoint;
+class MeshBuffer;
 class RenderView;
 struct HitTestResult;
 struct ImDrawList;
@@ -40,6 +42,7 @@ public:
    }
    void RenderPane(const AreaRect& rect, int leafId) override;
    void OnUnhosted() override;
+   void CancelGizmoDrag() override;
 
    // Renders the scene parts for this pane's render pass (called by the editor while this pane's
    // render view is being recorded): filtered by the pane's own camera mode and shading setup
@@ -69,10 +72,17 @@ public:
    void ResetCameraFromPlayer();
    void SetBackdropCamera();
    void SetPlayfieldCamera();
-   void SetView(PredefinedView view); // Axis aligned view, keeping the orbit target and distance
+   void SetView(PredefinedView view); // Axis aligned orthographic view, keeping the orbit target and distance
    void AnimateViewTo(PredefinedView view); // Same snap as SetView, animated (gizmo click, numpad 1/3/7, View menu)
    // The pane's view mode is fixed by its area type: there is no camera mode cycle anymore
    void FrameSelection(); // Camera centered on the selection, zoomed to fill the view
+   void FrameAll(); // Camera framing the whole table (Home)
+   void FrameBounds(const FRect3D& bounds); // Shared bounds fit of FrameSelection and FrameAll
+   bool GetNavPivot(vec3& target) const; // Selection center when 'orbit around selection' is on and something is selected
+   bool PickDepthPoint(const ImVec2& mousePos, vec3& point); // 3D point under the cursor (front-most hit, else the playfield plane)
+   void OrbitCamera(float dx, float dy); // Orbit the pane camera around its target (MMB & view gizmo & renderer inspection); leaving a predefined view switches to perspective
+   void SetFov(float fovY); // Change the vertical FOV keeping the framing (Editor_NavFovY is updated)
+   void SetPerspectiveCam(bool perspective); // Switch between perspective and orthographic cameras, keeping the framing (perspective drops any predefined view: they are orthographic)
 
    // 3D view setup of the pane (camera mode and pose, shading, orbit lock), serialized into the
    // hosting leaf's persisted payload so it is restored with the layout on the next session
@@ -86,6 +96,8 @@ public:
    ImVec2 Project(const Vertex3Ds& v) const; // Table-space point -> display px (FLT_MAX when behind the camera)
    bool PickRay(const ImVec2& pos, Vertex3Ds& nearPt, Vertex3Ds& farPt) const; // Display px -> world ray
    void RayCastParts(const ImVec2& mousePos, vector<HitTestResult>& vhoHit); // Pick the colliders under the mouse (filtered by pickability)
+   void HitTestMarkers(const ImVec2& mousePos, vector<std::pair<float, std::shared_ptr<EditorUIPart>>>& hits)
+      const; // Pick the parts the collider ray cast cannot hit (collider-less parts, edge-on flat colliders) by screen space, sorted by depth along the pick ray
    Vertex2D UnprojectToPlane(const ImVec2& mousePos, float z) const; // Display px -> table plane point at the given Z
    DragPoint* HitTestDragPoint(const ImVec2& mousePos) const; // Drag point of the edited curve under the mouse
    bool HitTestEditCenter(const ImVec2& mousePos) const; // Is the mouse on the edited part's center point
@@ -99,12 +111,43 @@ public:
    // Helper messages of the status bar while this pane is the context view (active op/drag or hovered)
    void AppendStatusHints(vector<StatusHint>& hints) const override;
 
+   // Tool shelf: the T overlay of this pane's image (edit modes, add part, gizmo orientation).
+   // Drawn once per frame for the target viewport pane only (see EditorUI::RenderUI)
+   void RenderToolShelf();
+   bool IsToolShelfShown() const { return m_showToolShelf; }
+   void ToggleToolShelf() { m_showToolShelf = !m_showToolShelf; }
+   float GetToolShelfWidth() const { return m_toolShelfWidth; } // Drawn shelf width last frame (0 when hidden)
+
+   // Sidebar: the N overlay of this pane's image (transform fields, tools, view options). Each
+   // pane owns its own (per-pane state like Blender), drawn from RenderPane while its leaf is shown
+   bool IsSidebarShown() const { return m_sidebar.IsShown(); }
+   void ToggleSidebar() { m_sidebar.Toggle(); }
+   bool IsSidebarHovered() const { return m_sidebar.IsHovered(); } // The panel counts as a pane hover for key routing
+
    int m_leafId = -1; // Leaf hosting this pane, set in RenderPane
 
    // Image interaction state, set in RenderPane and read by the editor for input routing
    bool m_hovered = false;
    bool m_active = false;
    bool m_flyMode = false; // Fly mode: the pane's 3D view takes the whole window, hiding the editor UI (F shortcut)
+
+   // Measure mode: click-drag on the playfield plane measures a distance (the last measurement stays until a new drag or a mode change)
+   bool m_measureMode = false;
+   bool m_measureDragging = false;
+   bool m_measureValid = false;
+   int m_measureAxis = -1; // Axis constraint during a measure drag (0 = X, 1 = Y, -1 = free)
+   Vertex3Ds m_measureFrom, m_measureTo;
+   void SetMeasureMode(const bool on)
+   {
+      SetGizmoOperation(ImGuizmo::OPERATION(0)); // The gizmo is inactive while measuring
+      m_measureMode = on;
+      m_measureDragging = false;
+      if (on)
+      {
+         m_measureValid = false;
+         m_measureAxis = -1;
+      }
+   }
    ImGuiWindow* m_window = nullptr; // This pane's ImGui window (registered to ImGuizmo so it accepts its hover)
    ImGuiID m_viewItemId = 0; // ID of the pane's scene item (the corner zones ignore it as a widget)
    ViewSetupID m_viewMode = BG_DESKTOP; // Backdrop mode of a render preview (desktop / FSS / cabinet)
@@ -114,9 +157,13 @@ public:
    // (m_camMode removed: m_viewType is the mode, fixed at creation)
    bool m_perspectiveCam = true;
    Renderer::ShadeMode m_shadeMode = Renderer::ShadeMode::Default;
+   bool m_showSpaceAxes = false; // Show the selection's reference space axes (EditorCam panes, persisted in the pane setup)
    float m_camAspect = 1.f; // Aspect ratio the stored projection was authored for, re-fitted on pane resize
-   PredefinedView m_predefinedView = PredefinedView::None;
+   PredefinedView m_predefinedView = PredefinedView::None; // Axis aligned view the camera is snapped to (always orthographic: orbiting out of it restores perspective)
    bool m_orbitLock = false;
+   bool m_orbitDragging = false; // A nav-button drag is orbiting the camera
+   bool m_orbitPivotValid = false; // m_orbitPivot is set for the current drag
+   vec3 m_orbitPivot { 0.f, 0.f, 0.f }; // Orbit pivot of the current drag (selection center or picked depth point, else the view target)
    Matrix3D m_camView, m_camProj;
    float m_camDistance = 1000.f;
    const ViewMode m_viewType; // The pane's area type: 3D Viewport (EditorCam), Desktop Backdrop or Render Preview — fixed at creation
@@ -128,11 +175,12 @@ public:
    ImGuizmo::MODE m_gizmoMode = ImGuizmo::WORLD;
    bool m_gizmoDragActive = false;
    vector<std::shared_ptr<EditorUIPart>> m_gizmoDragSelection;
-   void SetGizmoOperation(ImGuizmo::OPERATION operation); // Edit mode actions of the header tool buttons (and of Esc to get back to select)
+   Matrix3D m_gizmoStartTransform; // Selection transform at gizmo drag start (Adjust Last Operation)
+   void SetGizmoOperation(ImGuizmo::OPERATION operation); // Edit mode actions of the tool shelf buttons (and of Esc to get back to select)
 
    // Blender-style modal transform op (keyboard G/S/R): the selection follows the mouse until
    // LMB/Enter confirms or RMB/Esc cancels and restores the start state. Distinct from the
-   // persistent gizmo tool armed by the header buttons: while active the op owns the pane's
+   // persistent gizmo tool armed by the tool shelf buttons: while active the op owns the pane's
    // input (and the editor's target viewport routing) and the gizmo is not drawn.
    struct TransformOp
    {
@@ -154,6 +202,10 @@ public:
       bool undoMarked = false; // An undo record was marked at op start (not in inspect sessions)
       size_t undoTop = 0; // Undo record count right after marking (our record is on top while it matches)
       bool changed = false; // The op actually moved the selection (a no-op confirm discards the undo record)
+      bool duplicate = false; // The op follows a Duplicate (Shift+D): its record is folded into the paste's on confirm
+      Vertex3Ds duplicateOrigin { 0.f, 0.f, 0.f }; // Position of the selection before the duplicate's grab
+      bool snapPointsBuilt = false; // m_snapPoints holds the point-snap candidates (built on first snapped move)
+      vector<Vertex2D> snapPoints; // Point snapping: drag points and centers of the unselected parts
       // Numeric delta entry (Blender: digits edit the delta fields, Tab cycles the allowed ones)
       bool numUsed = false; // Any delta field was typed into: parsed values replace the mouse delta
       int numField = 0; // Field currently edited (grab & scale: allowed axes; rotate: field 0)
@@ -170,6 +222,7 @@ private:
 
    // Modal transform helpers
    unsigned ContextAxisMask() const; // Axes the modal ops may use in this pane's context (point edit, backdrop, predefined view)
+   unsigned SelectionAxisMask(ImGuizmo::OPERATION op) const; // Axes the op may use on the selected parts (surface: rotate Z only, no scale Z)
    int AxisIndex(unsigned mask) const; // First set axis index of a single-axis mask (-1 when not exactly one axis)
    Vertex3Ds OpAxisDir(int axis) const; // Constraint axis direction in table space (world axis or start transform's basis column)
    bool RayPlaneHit(const ImVec2& pos, const Vertex3Ds& planePt, const Vertex3Ds& normal, Vertex3Ds& hit) const; // Mouse ray / plane intersection
@@ -182,7 +235,8 @@ private:
 
    // View orientation gizmo (Blender navball): an XYZ tripod at the top right of the pane's image.
    // A LMB drag orbits the camera (independently of the orbit lock, which only remaps MMB), a click
-   // on an axis end animates the camera to that axis aligned predefined view. EditorCam panes only.
+   // on an axis end animates the camera to that axis aligned predefined view. EditorCam panes only,
+   // and not while flying (the pane's image is off screen then)
    bool m_viewGizmoDragging = false; // LMB drag in progress (orbiting)
    ImVec2 m_viewGizmoPress; // Mouse position at drag start (click/drag disambiguation)
    int m_viewGizmoPressEnd = -1; // Axis end under the press (0..5 = +X,-X,+Y,-Y,+Z,-Z; -1 = none)
@@ -193,11 +247,34 @@ private:
    vec3 m_viewAnimDir, m_viewAnimUp;
    PredefinedView m_viewAnimTarget = PredefinedView::None;
    void RenderViewGizmo(ImDrawList* drawList); // Draw and input, called from RenderUI (EditorCam only)
-   void OrbitCamera(float dx, float dy); // Orbit the pane camera around its target (MMB & view gizmo)
    void DragCamera(ImVec2 drag, bool pan);
    void ZoomCamera(float factor);
    void TwistCamera(float degrees);
    static void GetViewOrientation(PredefinedView view, vec3& dir, vec3& up); // Orbit dir/up of a predefined view
+
+   // Reference space axes (an axes/plane reference of a reference space: playfield bounds & glass
+   // box, or infinite room axes — the cabinet & cabinet feet spaces share the room transform in
+   // live edit as they only differ by the user space settings which are not applied there)
+   struct SpaceAxes
+   {
+      std::shared_ptr<MeshBuffer> mesh;
+      float bounds[6] = { 0.f, 0.f, 0.f, 0.f, 0.f, 0.f }; // Playfield bounds the mesh was built for (left, top, right, bottom, glass bottom/top)
+      uint32_t ranges[14] = { 0 }; // Index ranges of the 7 segments (square, X, Y, glass, Z, -X, -Y)
+      Vertex3Ds center { 0.f, 0.f, 0.f };
+   };
+   const SpaceAxes* EnsureSpaceAxesMesh(PartGroupData::SpaceReference space); // (Re)build the reference mesh when the space or the table bounds changed
+   SpaceAxes m_spaceAxes[2]; // [0] playfield space, [1] room space (also cabinet & cabinet feet)
+
+   // Sidebar (N): per-pane Blender-style N panel, persisted inside the leaf's setup (see SaveSetup)
+   ViewportSidebar m_sidebar;
+
+   // Tool shelf (T): the View menu / T toggle, and its drawn size which keeps the status info text next to it
+   bool ToolShelfVisible() const; // Shelf enabled and allowed in the current state (it may still not fit, see m_toolShelfDrawn)
+   bool m_showToolShelf = true; // View > Tool Shelf
+   bool m_toolShelfDrawn = false; // The shelf was drawn last frame
+   float m_toolShelfWidth = 0.f; // Drawn shelf width last frame (0 when hidden)
+   // Tooltip with a title, an optional shortcut chip and an optional dim description (works on disabled items)
+   static void Tip(const char* title, const char* shortcut = nullptr, const char* description = nullptr);
 
    // Box selection drag state (a left button drag that hit no part nor drag point)
    bool m_boxSelectActive = false;

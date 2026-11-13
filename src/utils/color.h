@@ -3,6 +3,7 @@
 #pragma once
 
 #include "../renderer/typedefs3D.h"
+#include "plugins/ColorSpace.h"
 
 #ifdef RGB
  #undef RGB
@@ -64,18 +65,16 @@ inline float InvsRGB(const float x)
 // Decodes the [0..100] brightness percentage that the legacy VPinMAME script interface
 // reports for DMD dots (see ScriptGlobalTable::put_DMDPixels) into a linear luminance (above 100 it extrapolates).
 // Note: the percentage is gamma encoded, so reading it as linear leaves the dark shades far too bright
-inline float InvsRGBPercent(const uint8_t percent)
+inline float InvsRGBPercent(const uint8_t percent) { return VPXColorSpace::PercentToLinear(percent); }
+
+// sRGB 8 bit to linear, exact (table shared with the plugins, see plugins/ColorSpace.h)
+inline float InvsRGB8(const uint8_t c) { return VPXColorSpace::SRGBToLinear(c); }
+
+// Linear in [0..1] to the nearest sRGB 8 bit code without powf, exact for every float (see plugins/ColorSpace.h)
+inline uint8_t sRGB8(const float c)
 {
-   static const struct Table
-   {
-      float v[256];
-      Table()
-      {
-         for (int i = 0; i < 256; i++)
-            v[i] = InvsRGB(static_cast<float>(i) * 0.01f);
-      }
-   } table;
-   return table.v[percent];
+   assert(c >= 0.f && c <= 1.f);
+   return VPXColorSpace::LinearToSRGB(c);
 }
 
 constexpr inline float invGammaApprox(const float c)

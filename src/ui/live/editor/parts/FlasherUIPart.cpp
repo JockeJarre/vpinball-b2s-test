@@ -2,8 +2,11 @@
 #include "FlasherUIPart.h"
 
 #include "../BlueprintRenderContext.h"
+#include "../ops/ReferenceImageOp.h"
+#include "core/player.h"
 #include "math/matrix.h"
 #include "plugins/VPXPlugin.h"
+#include "ui/live/LiveUI.h"
 #include "utils/color.h"
 
 
@@ -33,12 +36,33 @@ FlasherUIPart::TransformMask FlasherUIPart::GetTransform(Matrix3D& transform)
    return static_cast<TransformMask>(TM_TransAny | TM_RotAny | TM_ScaleX | TM_ScaleY | TM_ScaleAll);
 }
 
+bool FlasherUIPart::ForcedVisibleInEditor() const
+{
+   // Reference images are flashers authored as invisible in play, shown in the editor instead.
+   // Never on the live copy: the inspected game keeps its own state (and its parts must not be written).
+   return m_part->GetPTable()->m_liveBaseTable == nullptr && ReferenceImageOp::IsReferenceImage(this);
+}
+
+DragPointCurve* FlasherUIPart::GetDragPointCurve() const { return (GetPointEditContext() == nullptr && ReferenceImageOp::IsReferenceImage(this)) ? nullptr : &m_part->m_curve; }
+
 void FlasherUIPart::SetTransform(const vec3& pos, const vec3& scale, const vec3& rot)
 {
    const Vertex2D center = m_part->GetCenter();
    // In plane scaling is applied to the drag points (in the part local frame, before the render rotation)
-   SetCurveScale(scale);
-   m_part->Translate(Vertex2D { pos.x - center.x, pos.y - center.y });
+   vec3 curveScale = scale;
+   if (ReferenceImageOp::IsReferenceImage(this))
+   {
+      // Reference images scale uniformly (gizmo axes, S and its axis constraints alike), so that the image is not stretched
+      // (the Size field of the Reference Image section sets the axes apart)
+      const Vertex2D uniform = ReferenceImageMath::UniformScale(Vertex2D(scale.x, scale.y), m_curveScale, m_lastScaleRequest);
+      curveScale = vec3(uniform.x, uniform.y, scale.z);
+      m_lastScaleRequest = Vertex2D(scale.x, scale.y);
+   }
+   SetCurveScale(curveScale);
+   const Vertex2D offset { pos.x - center.x, pos.y - center.y };
+   m_part->Translate(offset);
+   m_translated.x += offset.x;
+   m_translated.y += offset.y;
    if (m_part->m_desktopBackdrop)
    {
       m_part->put_RotZ(rot.z);
@@ -48,6 +72,18 @@ void FlasherUIPart::SetTransform(const vec3& pos, const vec3& scale, const vec3&
    m_part->put_RotX(rot.x);
    m_part->put_RotY(rot.y);
    m_part->put_RotZ(rot.z);
+}
+
+// Flasher::Translate also moves the render vertices, which the captured data does not hold: they are
+// translated back by the offset applied since the capture (the drag points are then restored over it)
+std::function<void()> FlasherUIPart::CaptureTransformState()
+{
+   return [this, restoreBase = EditableUIPart<Flasher>::CaptureTransformState(), translated = m_translated]()
+   {
+      m_part->Translate(Vertex2D { translated.x - m_translated.x, translated.y - m_translated.y });
+      m_translated = translated;
+      restoreBase();
+   };
 }
 
 void FlasherUIPart::RenderOverlay(const EditorRenderContext& ctx)
@@ -137,9 +173,9 @@ void FlasherUIPart::RenderBlueprint(const BlueprintRenderContext& ctx)
          ctx.Rectangle(_minx, _miny, _maxx, _maxy);
       }
 
-      // if the item is selected then draw the dragpoints (or if we are always to draw dragpoints)
-      bool drawDragpoints = (ctx.m_partSelected || (this == ctx.m_pointEditPart) || g_settingsService.GetAppSettings().GetEditor_ShowDragPoints());
-      if (!drawDragpoints)
+      // if the item is selected then draw the dragpoints (or if we are always to draw dragpoints); reference images have no point handles
+      bool drawDragpoints = GetDragPointCurve() != nullptr && (ctx.m_partSelected || (this == ctx.m_pointEditPart) || g_settingsService.GetAppSettings().GetEditor_ShowDragPoints());
+      if (!drawDragpoints && GetDragPointCurve() != nullptr)
       {
          // if any of the dragpoints of this object are selected then draw all the dragpoints
          for (const auto& pdp : m_part->m_curve.GetPoints())
@@ -173,6 +209,48 @@ void FlasherUIPart::RenderBlueprint(const BlueprintRenderContext& ctx)
 void FlasherUIPart::UpdatePropertyPane(PropertyPane& props)
 {
    props.EditableHeader("Flasher"s, m_part);
+
+   if (ReferenceImageOp::IsReferenceImage(this))
+   {
+      if (props.BeginSection("Reference Image"s))
+      {
+         props.SliderInt<Flasher>(
+            m_part, "Opacity"s, 0, 100, //
+            [](const Flasher* flasher) { return flasher->m_d.m_alpha; }, //
+            [](Flasher* flasher, int v) { flasher->m_d.m_alpha = v; });
+         props.ImageCombo<Flasher>(
+            m_part, "Image"s, //
+            [](const Flasher* flasher) { return flasher->m_d.m_szImageA; }, //
+            [](Flasher* flasher, const string& v)
+            {
+               if (ReferenceImageOp::IsReferenceImage(flasher, &g_pplayer->m_liveUI->m_editorUI)) // Co-edited flashers of a mixed selection are left alone
+                  ReferenceImageOp::ReplaceImage(flasher, v);
+            },
+            "Replaces the image, keeping the position, rotation and width (fitted to its aspect)");
+         props.InputFloat2<Flasher>(
+            m_part, "Size"s, //
+            [](const Flasher* flasher)
+            {
+               const ReferenceImageMath::Rect rect = ReferenceImageOp::GetRect(flasher);
+               return Vertex2D(rect.width, rect.height);
+            }, //
+            [](Flasher* flasher, const Vertex2D& v)
+            {
+               if (ReferenceImageOp::IsReferenceImage(flasher, &g_pplayer->m_liveUI->m_editorUI))
+                  ReferenceImageOp::SetSize(flasher, v);
+            },
+            PropertyPane::Unit::VPLength, 1, "Width and height. The gizmo and S scale both together; set them apart here (Fit to Image restores the image's aspect)");
+         props.Button<Flasher>(
+            m_part, "Fit to Image"s,
+            [](Flasher* flasher)
+            {
+               if (ReferenceImageOp::IsReferenceImage(flasher, &g_pplayer->m_liveUI->m_editorUI))
+                  ReferenceImageOp::FitToImage(flasher);
+            },
+            "Rebuilds a clean rectangle at the image's aspect, keeping the centre, rotation and width");
+         props.EndSection();
+      }
+   }
 
    UpdateCurveSection(props);
 

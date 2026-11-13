@@ -89,6 +89,12 @@
     <ClCompile Include="../../tests/misc/test-collection.cpp">
       <Filter>misc</Filter>
     </ClCompile>
+    <ClCompile Include="../../tests/misc/test-color.cpp">
+      <Filter>misc</Filter>
+    </ClCompile>
+    <ClCompile Include="../../tests/misc/test-envmap-precalc.cpp">
+      <Filter>misc</Filter>
+    </ClCompile>
     <ClCompile Include="../../tests/misc/test-material.cpp">
       <Filter>misc</Filter>
     </ClCompile>
@@ -200,6 +206,9 @@
     <ClCompile Include="../../tests/physics/test-physics-engine.cpp">
       <Filter>physics</Filter>
     </ClCompile>
+    <ClCompile Include="../../tests/physics/test-physics-profile.cpp">
+      <Filter>physics</Filter>
+    </ClCompile>
     <ClCompile Include="../../tests/physics/test-quadtree.cpp">
       <Filter>physics</Filter>
     </ClCompile>
@@ -249,6 +258,9 @@
       <Filter>render</Filter>
     </ClCompile>
     <ClCompile Include="../../tests/ui/test-arealayout.cpp">
+      <Filter>ui</Filter>
+    </ClCompile>
+    <ClCompile Include="../../tests/ui/test-referenceimage.cpp">
       <Filter>ui</Filter>
     </ClCompile>
   </ItemGroup>

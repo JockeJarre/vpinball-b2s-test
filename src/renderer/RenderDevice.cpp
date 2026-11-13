@@ -1265,6 +1265,11 @@ static constexpr D3DVERTEXELEMENT9 VertexNormalTexelElement[] = { { 0, 0 * sizeo
    { 0, 3 * sizeof(float), D3DDECLTYPE_FLOAT3, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_NORMAL, 0 }, // normal
    { 0, 6 * sizeof(float), D3DDECLTYPE_FLOAT2, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_TEXCOORD, 0 }, // tex0
    D3DDECL_END() };
+// Matches ImDrawVert (and VertexUI): 2D position, texcoords, packed RGBA color
+static constexpr D3DVERTEXELEMENT9 VertexImGuiElement[] = { { 0, 0 * sizeof(float), D3DDECLTYPE_FLOAT2, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_POSITION, 0 }, // pos
+   { 0, 2 * sizeof(float), D3DDECLTYPE_FLOAT2, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_TEXCOORD, 0 }, // tex0
+   { 0, 4 * sizeof(float), D3DDECLTYPE_UBYTE4N, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_COLOR, 0 }, // color
+   D3DDECL_END() };
 
 void RenderDevice::CaptureDX9Screenshot()
 {
@@ -1480,6 +1485,13 @@ RenderDevice::RenderDevice(
 
    init.callback = &m_bgfxCallback;
    init.fallback = true;
+   // Live editor sessions generate a lot of UI geometry each frame: raise the transient buffer arenas
+   // used for the LiveUI uploads (player sessions keep the BGFX defaults)
+   if ((g_pplayer->m_playMode == Player::PlayMode::LiveEdit) || (g_pplayer->m_playMode == Player::PlayMode::FullEdit))
+   {
+      init.limits.maxTransientVbSize = 32 * 1024 * 1024;
+      init.limits.maxTransientIbSize = 8 * 1024 * 1024;
+   }
    init.swapChain.width = swapchainWnd->GetPixelWidth();
    init.swapChain.height = swapchainWnd->GetPixelHeight();
    init.platformData.context = nullptr;
@@ -1921,10 +1933,18 @@ RenderDevice::RenderDevice(
       .add(bgfx::Attrib::Normal, 3, bgfx::AttribType::Float)
       .add(bgfx::Attrib::TexCoord0, 2, bgfx::AttribType::Float)
       .end();
-   #elif defined(ENABLE_DX9)
+   // Matches ImDrawVert (and VertexUI): 2D position, texcoords, packed RGBA color normalized to [0,1]
+   m_pVertexImGuiDeclaration = new bgfx::VertexLayout;
+   m_pVertexImGuiDeclaration->begin()
+      .add(bgfx::Attrib::Position, 2, bgfx::AttribType::Float)
+      .add(bgfx::Attrib::TexCoord0, 2, bgfx::AttribType::Float)
+      .add(bgfx::Attrib::Color0, 4, bgfx::AttribType::Uint8, true)
+      .end();
+#elif defined(ENABLE_DX9)
    CHECKD3D(m_pD3DDevice->CreateVertexDeclaration(VertexTexelElement, &m_pVertexTexelDeclaration));
    CHECKD3D(m_pD3DDevice->CreateVertexDeclaration(VertexNormalTexelElement, &m_pVertexNormalTexelDeclaration));
-   #endif
+   CHECKD3D(m_pD3DDevice->CreateVertexDeclaration(VertexImGuiElement, &m_pVertexImGuiDeclaration));
+#endif
 
    // Vertex buffers
    static constexpr float verts[4 * 5] =
@@ -2047,48 +2067,51 @@ RenderDevice::~RenderDevice()
       m_pD3DDevice->SetDepthStencilSurface(nullptr);
       SAFE_RELEASE(m_pVertexTexelDeclaration);
       SAFE_RELEASE(m_pVertexNormalTexelDeclaration);
-   #endif
+      SAFE_RELEASE(m_pVertexImGuiDeclaration);
+#endif
 
-   delete m_uiShader;
-   m_uiShader = nullptr;
-   delete m_basicShader;
-   m_basicShader = nullptr;
-   delete m_DMDShader;
-   m_DMDShader = nullptr;
-   delete m_FBShader;
-   m_FBShader = nullptr;
-   delete m_stereoShader;
-   m_stereoShader = nullptr;
-   delete m_flasherShader;
-   m_flasherShader = nullptr;
-   delete m_lightShader;
-   m_lightShader = nullptr;
-   delete m_ballShader;
-   m_ballShader = nullptr;
+      delete m_uiShader;
+      m_uiShader = nullptr;
+      delete m_basicShader;
+      m_basicShader = nullptr;
+      delete m_DMDShader;
+      m_DMDShader = nullptr;
+      delete m_FBShader;
+      m_FBShader = nullptr;
+      delete m_stereoShader;
+      m_stereoShader = nullptr;
+      delete m_flasherShader;
+      m_flasherShader = nullptr;
+      delete m_lightShader;
+      m_lightShader = nullptr;
+      delete m_ballShader;
+      m_ballShader = nullptr;
 
-   m_nullTexture = nullptr;
-   m_SMAAareaTexture = nullptr;
-   m_SMAAsearchTexture = nullptr;
-   m_texMan.UnloadAll();
-   #if defined(ENABLE_BGFX)
+      m_nullTexture = nullptr;
+      m_SMAAareaTexture = nullptr;
+      m_SMAAsearchTexture = nullptr;
+      m_texMan.UnloadAll();
+#if defined(ENABLE_BGFX)
       // Samplers still queued here own BGFX textures: release them before BGFX is shut down
       m_pendingTextureUploads.clear();
-   #endif
+#endif
 
-   m_renderFrame = nullptr;
+      m_renderFrame = nullptr;
 
-   for (auto wnd : m_outputWnd)
-   {
-      delete wnd->GetBackBuffer();
-      wnd->SetBackBuffer(nullptr);
-   }
+      for (auto wnd : m_outputWnd)
+      {
+         delete wnd->GetBackBuffer();
+         wnd->SetBackBuffer(nullptr);
+      }
 
 #if defined(ENABLE_BGFX)
    delete m_pVertexTexelDeclaration;
    delete m_pVertexNormalTexelDeclaration;
+   delete m_pVertexImGuiDeclaration;
 
-   if (bgfx::isValid(m_srgbMipmapProgram))
-      bgfx::destroy(m_srgbMipmapProgram);
+   for (bgfx::ProgramHandle& program : m_mipmapPrograms)
+      if (bgfx::isValid(program))
+         bgfx::destroy(program);
 
    // Shutdown BGFX once all native resources have been cleaned up
    m_rendererInitialized.release();
@@ -2629,22 +2652,36 @@ void RenderDevice::UploadAndSetSMAATextures()
 
 void RenderDevice::UploadTexture(ITexManCacheable* texture, const bool linearRGB)
 {
-   std::shared_ptr<Sampler> sampler = m_texMan.LoadTexture(texture, linearRGB);
-   #if defined(ENABLE_BGFX)
-   // BGFX dispatch operations to the render thread, so the texture manager does not actually loads data to the GPU nor perform mipmap generation
-   // The frame mutex must only be acquired when no frame is pending: the render thread needs it to consume a pending frame
-   while (m_framePending || !m_frameMutex.try_lock())
+   UploadTextures({ { texture, linearRGB } });
+}
+
+void RenderDevice::UploadTextures(const vector<std::pair<ITexManCacheable*, bool>>& textures)
+{
+#if defined(ENABLE_BGFX)
+   // BGFX uploads and generates mipmaps on the render thread. Batched, as each submission costs two frames, while bounding a frame's work
+   constexpr size_t batchSize = 64;
+   for (size_t start = 0; start < textures.size(); start += batchSize)
    {
-      g_pplayer->ProcessOSMessages();
-      Sleep(0);
+      vector<std::shared_ptr<Sampler>> samplers;
+      for (size_t i = start; i < min(start + batchSize, textures.size()); i++)
+         samplers.push_back(m_texMan.LoadTexture(textures[i].first, textures[i].second, false));
+      // The frame mutex must only be acquired when no frame is pending: the render thread needs it to consume a pending frame
+      while (m_framePending || !m_frameMutex.try_lock())
+      {
+         g_pplayer->ProcessOSMessages();
+         Sleep(0);
+      }
+      {
+         std::lock_guard lock(m_pendingTextureUploadsMutex);
+         m_pendingTextureUploads.insert(m_pendingTextureUploads.end(), samplers.begin(), samplers.end());
+      }
+      SubmitRenderFrame(); // Submit texture uploads to render thread
+      SubmitRenderFrame(); // Block until render thread has processed the pending texture uploads and mipmap generations
+      m_frameMutex.unlock();
    }
-   {
-      std::lock_guard lock(m_pendingTextureUploadsMutex);
-      m_pendingTextureUploads.push_back(sampler);
-   }
-   SubmitRenderFrame(); // Submit texture upload to render thread
-   SubmitRenderFrame(); // Block until render thread has processed the pending texture uploads and mipmap generations
-   m_frameMutex.unlock();
+#else
+   for (const auto& [texture, linearRGB] : textures)
+      m_texMan.LoadTexture(texture, linearRGB, false);
 #endif
 }
 
@@ -2851,6 +2888,9 @@ void RenderDevice::SetClipPlane(const vec4 &plane)
    const D3DXPLANE dxplane(-plane.x, -plane.y, -plane.z, -plane.w);
    D3DXPlaneTransform(&clipSpacePlane, &dxplane, &m);
    GetCoreDevice()->SetClipPlane(0, clipSpacePlane);
+   // The ball impostor cannot rely on the hardware clip plane (which is evaluated at the impostor quad depth, not at the
+   // analytic surface depth), so it receives the plane and performs the clip test in its fragment shader
+   m_ballShader->SetVector(ShaderUniform::clip_plane, &plane);
 #endif
 }
 
@@ -3008,6 +3048,18 @@ void RenderDevice::DrawMesh(Shader* shader, const bool isTranparentPass, const V
    m_nextRenderCommandDependency = nullptr;
    m_currentPass->Submit(cmd);
 }
+
+#if defined(ENABLE_BGFX)
+void RenderDevice::DrawTransientMesh(Shader* shader, const bool isTransparentPass, const float depth, std::shared_ptr<UIListGeometry> geo, std::shared_ptr<MeshBuffer> mb,
+   const PrimitiveTypes type, const uint32_t startIndex, const uint32_t indexCount)
+{
+   RenderCommand* cmd = m_renderFrame->NewCommand();
+   cmd->SetDrawTransientMesh(shader, std::move(geo), std::move(mb), type, startIndex, indexCount, isTransparentPass, depth);
+   cmd->m_dependency = m_nextRenderCommandDependency;
+   m_nextRenderCommandDependency = nullptr;
+   m_currentPass->Submit(cmd);
+}
+#endif
 
 void RenderDevice::DrawGaussianBlur(RenderTarget* source, RenderTarget* tmp, RenderTarget* dest, float kernel_size, int singleLayer)
 {

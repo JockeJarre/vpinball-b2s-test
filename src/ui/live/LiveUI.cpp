@@ -5,15 +5,14 @@
 
 #include "core/VPApp.h"
 #include "core/VPXPluginAPIImpl.h"
-#include "editor/IconsLucide.h"
-#include "editor/LucideFont.h"
+#include "IconsLucide.h"
+#include "LucideFont.h"
 #include "fonts/DroidSans.h"
 #include "fonts/DroidSansBold.h"
-#include "fonts/IconsForkAwesome.h"
-#include "fonts/ForkAwesome.h"
 #include "math/matrix.h"
 #include "plugins/VPXPlugin.h"
 #include "renderer/Renderer.h"
+#include "renderer/RenderCommand.h"
 #include "renderer/VRDevice.h"
 
 #include "imgui/imgui.h"
@@ -23,6 +22,10 @@
 
 
 ImGui::MarkdownConfig LiveUI::markdown_config;
+
+// ImGui draw lists are uploaded to the GPU without any conversion (VF_IMGUI vertex format)
+static_assert(sizeof(ImDrawVert) == sizeof(VertexUI) && offsetof(ImDrawVert, pos) == offsetof(VertexUI, x) && offsetof(ImDrawVert, uv) == offsetof(VertexUI, tu)
+   && offsetof(ImDrawVert, col) == offsetof(VertexUI, color));
 
 // Implementation of supporting function for logging of all math objects
 namespace plog
@@ -58,12 +61,6 @@ LiveUI::LiveUI(RenderDevice *const rd)
 
    // UI fonts
    m_baseFont = io.Fonts->AddFontFromMemoryCompressedTTF(droidsans_compressed_data, droidsans_compressed_size, 13.0f * m_uiScale);
-   ImFontConfig icons_config;
-   icons_config.MergeMode = true;
-   icons_config.PixelSnapH = true;
-   icons_config.GlyphMinAdvanceX = 13.0f * m_uiScale;
-   static constexpr ImWchar icons_ranges[] = { ICON_MIN_FK, ICON_MAX_16_FK, 0 };
-   io.Fonts->AddFontFromMemoryCompressedTTF(fork_awesome_compressed_data, fork_awesome_compressed_size, 13.0f * m_uiScale, &icons_config, icons_ranges);
    // Lucide line icons for the live editor (24 px grid glyphs, drawn a bit larger than the text and centered on it)
    ImFontConfig lucide_config;
    lucide_config.MergeMode = true;
@@ -83,7 +80,7 @@ LiveUI::LiveUI(RenderDevice *const rd)
    markdown_config.linkCallback = MarkdownLinkCallback;
    markdown_config.tooltipCallback = nullptr;
    markdown_config.imageCallback = MarkdownImageCallback;
-   //markdown_config.linkIcon = ICON_FA_LINK;
+   //markdown_config.linkIcon = ICON_LC_LINK;
    markdown_config.headingFormats[0] = { H1, true };
    markdown_config.headingFormats[1] = { H2, true };
    markdown_config.headingFormats[2] = { H3, false };
@@ -484,7 +481,7 @@ void LiveUI::RenderUI()
       ImGui::SetNextWindowPos(ImVec2(ImGui::GetIO().DisplaySize.x - 24 * m_uiScale, 4 * m_uiScale));
       ImGui::Begin("PauseOverlay", nullptr, ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoBringToFrontOnFocus // Prevent focus issues
             | ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings);
-      ImGui::Text(ICON_FK_PAUSE);
+      ImGui::Text(ICON_LC_PAUSE);
       ImGui::End();
    }
 
@@ -600,36 +597,49 @@ void LiveUI::RenderUI()
       const unsigned int numIndices = cmd_list->IdxBuffer.size();
       hasContent |= numIndices > 0;
 
+#if defined(ENABLE_BGFX)
+      // Snapshot this command list's geometry: it is uploaded on the render thread, into BGFX's
+      // per-frame transient arena when it has room (single copy, no persistent buffer traffic), or
+      // into the persistent dynamic MeshBuffer as a fallback
+      if (static_cast<int>(m_uiGeometry.size()) <= n)
+         m_uiGeometry.resize(n + 1);
+      if (m_uiGeometry[n] == nullptr)
+         m_uiGeometry[n] = std::make_shared<UIListGeometry>();
+      const std::shared_ptr<UIListGeometry> &geo = m_uiGeometry[n];
+      geo->numVertices = numVertices;
+      geo->numIndices = numIndices;
+      geo->upload = UIListGeometry::Upload::None;
+      geo->vtx.resize(numVertices * sizeof(ImDrawVert));
+      geo->idx.resize(numIndices * sizeof(ImDrawIdx));
+      memcpy(geo->vtx.data(), cmd_list->VtxBuffer.Data, geo->vtx.size());
+      memcpy(geo->idx.data(), cmd_list->IdxBuffer.Data, geo->idx.size());
+      if (((numVertices != 0) && (numIndices != 0)) && ((m_meshBuffers[n] == nullptr) || (m_meshBuffers[n]->m_ib->m_count < numIndices) || (m_meshBuffers[n]->m_vb->m_count < numVertices)))
+      { // Grow at 1.5x the needed size to amortize reallocation when the UI keeps growing
+         auto ib = std::make_shared<IndexBuffer>(m_rd, numIndices + (numIndices >> 1), true, IndexBuffer::Format::FMT_INDEX32);
+         auto vb = std::make_shared<VertexBuffer>(m_rd, numVertices + (numVertices >> 1), nullptr, true, VertexFormat::VF_IMGUI);
+         m_meshBuffers[n] = std::make_shared<MeshBuffer>(std::format("ImGui.{}", n), vb, ib, false);
+      }
+#else
       if ((numVertices != 0) && (numIndices != 0))
       {
          if ((m_meshBuffers[n] == nullptr) || (m_meshBuffers[n]->m_ib->m_count < numIndices) || (m_meshBuffers[n]->m_vb->m_count < numVertices))
-         {
-            auto ib = std::make_shared<IndexBuffer>(m_rd, max(m_meshBuffers[n] ? m_meshBuffers[n]->m_ib->m_count : 0, numIndices), true, IndexBuffer::Format::FMT_INDEX32);
-            auto vb = std::make_shared<VertexBuffer>(m_rd, max(m_meshBuffers[n] ? m_meshBuffers[n]->m_vb->m_count : 0, numVertices), nullptr, true);
+         { // Grow at 1.5x the needed size to amortize reallocation when the UI keeps growing
+            auto ib = std::make_shared<IndexBuffer>(m_rd, numIndices + (numIndices >> 1), true, IndexBuffer::Format::FMT_INDEX32);
+            auto vb = std::make_shared<VertexBuffer>(m_rd, numVertices + (numVertices >> 1), nullptr, true, VertexFormat::VF_IMGUI);
             m_meshBuffers[n] = std::make_shared<MeshBuffer>(std::format("ImGui.{}", n), vb, ib, false);
          }
 
-         Vertex3D_NoTex2 *vb;
-         m_meshBuffers[n]->m_vb->Lock(vb);
-         for (unsigned int i = 0; i < numVertices; i++)
-         {
-            const uint32_t rgba = cmd_list->VtxBuffer[i].col;
-            vb[i].x = cmd_list->VtxBuffer[i].pos.x;
-            vb[i].y = cmd_list->VtxBuffer[i].pos.y;
-            vb[i].z = (float)((rgba >> 24) & 0xFFu) * (float)(1.0 / 255.0); // alpha
-            vb[i].nx = (float)(rgba & 0x000000FFu) * (float)(1.0 / 255.0); // red
-            vb[i].ny = (float)(rgba & 0x0000FF00u) * (float)(1.0 / 65280.0); // green
-            vb[i].nz = (float)(rgba & 0x00FF0000u) * (float)(1.0 / 16711680.0); // blue
-            vb[i].tu = cmd_list->VtxBuffer[i].uv.x;
-            vb[i].tv = cmd_list->VtxBuffer[i].uv.y;
-         }
+         ImDrawVert *vb;
+         m_meshBuffers[n]->m_vb->Lock(vb, 0, numVertices * sizeof(ImDrawVert));
+         memcpy(vb, cmd_list->VtxBuffer.Data, numVertices * sizeof(ImDrawVert));
          m_meshBuffers[n]->m_vb->Unlock();
 
          uint32_t *ib;
-         m_meshBuffers[n]->m_ib->Lock(ib);
+         m_meshBuffers[n]->m_ib->Lock(ib, 0, numIndices * sizeof(ImDrawIdx));
          memcpy(ib, cmd_list->IdxBuffer.begin(), numIndices * sizeof(ImDrawIdx));
          m_meshBuffers[n]->m_ib->Unlock();
       }
+#endif
 
       for (const ImDrawCmd *cmd = cmd_list->CmdBuffer.begin(), *cmdEnd = cmd_list->CmdBuffer.end(); cmd != cmdEnd; cmd++)
       {
@@ -642,7 +652,12 @@ void LiveUI::RenderUI()
             uiParams.y = (cmd->GetTexID() != nullptr && cmd->GetTexID()->IsSRGB()) ? 1.f : 0.f;
             m_rd->m_uiShader->SetVector(ShaderUniform::staticColor_Alpha, &uiParams);
             #endif
+#if defined(ENABLE_BGFX)
+            if (m_meshBuffers[n] != nullptr)
+               m_rd->DrawTransientMesh(m_rd->m_uiShader, true, static_cast<float>(depthSort), geo, m_meshBuffers[n], RenderDevice::TRIANGLELIST, cmd->IdxOffset, cmd->ElemCount);
+#else
             m_rd->DrawMesh(m_rd->m_uiShader, true, Vertex3Ds(0.f, 0.f, 0.f), static_cast<float>(depthSort), m_meshBuffers[n], RenderDevice::TRIANGLELIST, cmd->IdxOffset, cmd->ElemCount);
+#endif
             depthSort--;
          }
       }
@@ -791,8 +806,8 @@ void LiveUI::SetupImGuiStyle(const bool isEditor) const
    style.Colors[ImGuiCol_Border] = ImVec4(0.306f, 0.306f, 0.306f, 1.0f);
    style.Colors[ImGuiCol_BorderShadow] = ImVec4(0.306f, 0.306f, 0.306f, 1.0f);
    style.Colors[ImGuiCol_FrameBg] = isEditor ? ImColor(0xFF545454) : ImColor(0.2f, 0.2f, 0.216f, 1.0f);
-   style.Colors[ImGuiCol_FrameBgHovered] = ImVec4(0.114f, 0.592f, 0.925f, 1.0f);
-   style.Colors[ImGuiCol_FrameBgActive] = ImVec4(0.0f, 0.467f, 0.784f, 1.0f);
+   style.Colors[ImGuiCol_FrameBgHovered] = ImVec4(0.10f, 0.28f, 0.45f, 1.0f);
+   style.Colors[ImGuiCol_FrameBgActive] = ImVec4(0.12f, 0.34f, 0.55f, 1.0f);
    style.Colors[ImGuiCol_TitleBg] = ImVec4(0.145f, 0.145f, 0.149f, 1.0f);
    style.Colors[ImGuiCol_TitleBgActive] = ImVec4(0.145f, 0.145f, 0.149f, 1.0f);
    style.Colors[ImGuiCol_TitleBgCollapsed] = ImVec4(0.145f, 0.145f, 0.149f, 1.0f);
@@ -802,8 +817,8 @@ void LiveUI::SetupImGuiStyle(const bool isEditor) const
    style.Colors[ImGuiCol_ScrollbarGrabHovered] = ImVec4(0.353f, 0.353f, 0.373f, 1.0f);
    style.Colors[ImGuiCol_ScrollbarGrabActive] = ImVec4(0.353f, 0.353f, 0.373f, 1.0f);
    style.Colors[ImGuiCol_CheckMark] = isEditor ? ImColor(0xFFdddddd) : ImColor(0.0f, 0.467f, 0.784f, 1.0f);
-   style.Colors[ImGuiCol_SliderGrab] = ImVec4(0.114f, 0.592f, 0.925f, 1.0f);
-   style.Colors[ImGuiCol_SliderGrabActive] = ImVec4(0.0f, 0.467f, 0.784f, 1.0f);
+   style.Colors[ImGuiCol_SliderGrab] = ImVec4(0.09f, 0.42f, 0.74f, 1.0f);
+   style.Colors[ImGuiCol_SliderGrabActive] = ImVec4(0.11f, 0.46f, 0.78f, 1.0f);
    style.Colors[ImGuiCol_Button] = ImVec4(0.2f, 0.2f, 0.216f, 1.0f);
    style.Colors[ImGuiCol_ButtonHovered] = ImVec4(0.114f, 0.592f, 0.925f, 1.0f);
    style.Colors[ImGuiCol_ButtonActive] = ImVec4(0.114f, 0.592f, 0.925f, 1.0f);

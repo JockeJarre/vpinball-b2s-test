@@ -429,11 +429,6 @@ Player::Player(PinTable *const table, const PlayMode playMode, LoadProgress &loa
       assert(m_renderer->m_stereo3D != STEREO_VR);
       m_liveUI->OpenEditorUI();
    }
-   if (playMode == PlayMode::FullEdit)
-   {
-      m_liveUI->PushNotification("** Saving should only be used on test tables as it may break table file **", 10000);
-      m_liveUI->PushNotification("This is a an early & unstable version of the Live Editor, only meant for testing.", 10000);
-   }
 
    m_loadProgress->SetProgress("Starting..."s, 100);
    m_loadProgress = &m_defaultLoadProgress; // The caller's reporter only lives during construction, later session reloads (table switches) log
@@ -721,46 +716,42 @@ void Player::InitTableSession(const bool isInitial)
 
    if (isInitial)
    {
-      // Preload all textures and images: upload textures that are flagged in the used textures
-      // cache, register the other ones for on demand upload (everything is shared between a base
-      // table and its live copies, so this is only needed for the first session)
-      tinyxml2::XMLDocument xmlDoc;
-      tinyxml2::XMLElement *preloadCache = nullptr;
-      if ((m_ptable->GetSettings().GetPlayer_CacheMode() > 0) && FileExists(m_ptable->m_filename))
+      // Images are loaded once per player (shared by a base table and its live copies). A preloaded image is decoded (and compressed),
+      // then kept in memory until first drawn, except the ones listed in the used textures cache (drawn in previous plays), which are
+      // uploaded right away. Play only preloads what it may draw: the images of the table, of the parts shown in play (see
+      // CollectPlayImages) and of the cache (f.e. swapped in by the script); the texture manager loads the others on first draw.
+      // The editor modes draw everything, so they preload everything
+      LoadUsedTextures();
+
+      const bool isEditorMode = m_playMode == PlayMode::LiveEdit || m_playMode == PlayMode::FullEdit;
+      vector<Texture *> preloadImages;
+      if (isEditorMode)
+         preloadImages = m_ptable->m_vimage;
+      else
       {
-         try
-         {
-            std::filesystem::path path = g_app->m_fileLocator.GetTablePath(m_ptable, FileLocator::TableSubFolder::Cache, false) / "used_textures.xml"sv;
-            if (FileExists(path))
-            {
-               PLOGI << "Texture cache found at " << path;
-               std::stringstream buffer;
-               std::ifstream myFile(path);
-               buffer << myFile.rdbuf();
-               myFile.close();
-               const string& xml = buffer.str();
-               if (xmlDoc.Parse(xml.c_str()) == tinyxml2::XML_SUCCESS)
-                  preloadCache = xmlDoc.FirstChildElement("textures");
-            }
-         }
-         catch (...) // something failed while trying to preload images
-         {
-            PLOGE << "Failed to load texture preload cache";
-         }
+         ankerl::unordered_dense::set<const Texture *> used;
+         m_ptable->CollectPlayImages(used);
+         for (const auto &[name, entry] : m_usedTextures)
+            if (const Texture *const image = m_ptable->GetImage(name); image != nullptr)
+               used.insert(image);
+         for (Texture *const image : m_ptable->m_vimage)
+            if (used.contains(image))
+               preloadImages.push_back(image);
+         if (preloadImages.size() < m_ptable->m_vimage.size())
+            PLOGI << (m_ptable->m_vimage.size() - preloadImages.size()) << " of " << m_ptable->m_vimage.size() << " images are not preloaded as no part shown in play uses them";
       }
 
       std::mutex mutex;
       int nLoadPerformed = 0;
       int nLoadInProgress = 0;
       vector<Texture *> failedPreloads;
-      const unsigned int maxTexDim = static_cast<unsigned int>(m_ptable->GetSettings().GetPlayer_MaxTexDimension());
+      m_renderer->m_renderDevice->m_texMan.SetMaxTexDimension(static_cast<unsigned int>(m_ptable->GetSettings().GetPlayer_MaxTexDimension()));
       m_texLoadStats.Reset();
-      m_texLoadStats.nImagesTotal = static_cast<int>(m_ptable->m_vimage.size());
-      for (const Texture *image : m_ptable->m_vimage)
+      m_texLoadStats.nImagesTotal = static_cast<int>(preloadImages.size());
+      for (const Texture *image : preloadImages)
          m_texLoadStats.nPixelsTotal += static_cast<uint64_t>(image->m_width) * image->m_height;
 
 #ifdef ENABLE_BGFX
-      std::unique_ptr<TextureCompressor> texCompressor;
       if (m_renderer->m_renderDevice->m_compressTextures && FileExists(m_ptable->m_filename))
       {
          // Texture compression relies on its disk cache, so it is disabled entirely when the cache folder is not writable
@@ -775,24 +766,21 @@ void Player::InitTableSession(const bool isInitial)
             std::error_code ec;
             std::filesystem::create_directories(texCacheFolder, ec);
             if (ec)
+            {
                PLOGE << "Failed to create texture cache folder " << texCacheFolder << " (" << ec.message() << "), texture compression is disabled";
+            }
             else
-               texCompressor = std::make_unique<TextureCompressor>(std::move(texCacheFolder), maxTexDim);
+               m_renderer->m_renderDevice->m_texMan.SetCompressor(std::make_shared<TextureCompressor>(std::move(texCacheFolder)));
          }
       }
 #endif
 
-#ifndef ENABLE_BGFX
-      vector<std::pair<Texture*, bool>> deferredUploads;
-#endif
-      auto loadImage = [progressPos = m_loadProgress->GetProgress() + progressPhysicLength, maxTexDim,
-#ifdef ENABLE_BGFX
-                          texCompressor = texCompressor.get(),
-#else
-                          &deferredUploads,
-#endif
-                          &mutex, &nLoadInProgress, &nLoadPerformed, preloadCache, this, &failedPreloads](Texture *image, bool resizeOnLowMem)
+      // Uploads of the textures of the used textures cache, batched once all images are loaded
+      vector<std::pair<ITexManCacheable *, bool>> deferredUploads;
+      auto loadImage = [progressPos = m_loadProgress->GetProgress() + progressPhysicLength, nPreload = std::max(static_cast<float>(preloadImages.size()) - 1.f, 1.f),
+                          &deferredUploads, &mutex, &nLoadInProgress, &nLoadPerformed, this, &failedPreloads](Texture *image, bool resizeOnLowMem)
       {
+         set_denormals_flush_to_zero_once(); // Runs on the pool's threads below: HDR image conversion and texture compression are much slower on denormals
          bool readyToLoad = false;
          while (!readyToLoad)
          {
@@ -827,10 +815,7 @@ void Player::InitTableSession(const bool isInitial)
                   const std::lock_guard<std::mutex> statsLock(m_texLoadStats.inFlightMutex);
                   m_texLoadStats.inFlight.emplace_back(image, false);
                }
-               std::shared_ptr<const BaseTexture> buffer;
-#ifdef ENABLE_BGFX
-               if (texCompressor)
-                  buffer = texCompressor->Load(image, resizeOnLowMem,
+               const std::shared_ptr<const BaseTexture> buffer = m_renderer->m_renderDevice->m_texMan.LoadBitmapCC(image, resizeOnLowMem, true,
                      [this, image, compressionStarted = false]() mutable
                      {
                         if (m_texLoadStats.skipCompression.load(std::memory_order_relaxed))
@@ -848,9 +833,6 @@ void Player::InitTableSession(const bool isInitial)
                         }
                         return false;
                      });
-#endif
-               if (buffer == nullptr)
-                  buffer = image->GetRawBitmap(resizeOnLowMem, maxTexDim);
                const std::lock_guard<std::mutex> lock(mutex);
                if (buffer)
                {
@@ -858,21 +840,8 @@ void Player::InitTableSession(const bool isInitial)
                   // We could upload all images, but this would need support for dynamic change of 'force linear' and would lead to load all VR textures on lower end systems
                   // Instead we register it to the texture manager that will hold a strong reference and upload when needed
                   m_renderer->m_renderDevice->m_texMan.AddPendingUpload(image, buffer);
-                  if (preloadCache)
-                     for (auto node = preloadCache->FirstChildElement("texture"); node != nullptr; node = node->NextSiblingElement())
-                     {
-                        bool linearRGB = false;
-                        const char *name = node->GetText();
-                        if (name != nullptr && image->m_name == name && node->QueryBoolAttribute("linear", &linearRGB) == tinyxml2::XML_SUCCESS)
-                        {
-#ifdef ENABLE_BGFX
-                           m_renderer->m_renderDevice->UploadTexture(image, linearRGB);
-#else
-                           deferredUploads.emplace_back(image, linearRGB);
-#endif
-                           break;
-                        }
-                     }
+                  if (const auto listed = m_usedTextures.find(image->m_name); listed != m_usedTextures.end())
+                     deferredUploads.emplace_back(image, listed->second.linear);
                   if ((image->m_width > buffer->width()) || (image->m_height > buffer->height()))
                   {
                      PLOG(buffer->m_resizedOnLowMem ? plog::Severity::error : plog::Severity::info) << "Image '" << image->m_name << "' was downsized from " << image->m_width << 'x' << image->m_height << " to " << buffer->width() << 'x' << buffer->height()
@@ -899,7 +868,7 @@ void Player::InitTableSession(const bool isInitial)
                   const std::lock_guard<std::mutex> statsLock(m_texLoadStats.inFlightMutex);
                   std::erase_if(m_texLoadStats.inFlight, [image](const std::pair<const Texture *, bool> &e) { return e.first == image; });
                }
-               m_loadProgress->SetProgress("Loading Textures..."s, progressPos + progressTextureLength * static_cast<float>(nLoadPerformed) / (static_cast<float>(m_ptable->m_vimage.size()) - 1.f));
+               m_loadProgress->SetProgress("Loading Textures..."s, progressPos + progressTextureLength * static_cast<float>(nLoadPerformed) / nPreload);
             }
          }
          {
@@ -914,7 +883,7 @@ void Player::InitTableSession(const bool isInitial)
       m_renderer->m_renderDevice->m_frameMutex.unlock();
 #endif
       progschj::ThreadPool pool(g_app->GetLogicalNumberOfProcessors());
-      for (auto image : m_ptable->m_vimage)
+      for (auto image : preloadImages)
          pool.enqueue_block(loadImage, image, false);
 
       bool showLoadingUI = false;
@@ -974,20 +943,11 @@ void Player::InitTableSession(const bool isInitial)
       for (auto image : failedPreloads)
          loadImage(image, true);
 
-#ifndef ENABLE_BGFX
-      for (const auto& [image, linearRGB] : deferredUploads)
-         m_renderer->m_renderDevice->UploadTexture(image, linearRGB);
-#endif
+      m_renderer->m_renderDevice->UploadTextures(deferredUploads);
 
       LockRenderThread();
 
-#ifdef ENABLE_BGFX
-      if (texCompressor)
-      {
-         texCompressor->LogStats();
-         texCompressor->CleanCache();
-      }
-#endif
+      m_renderer->m_renderDevice->m_texMan.EndLoading(m_ptable->m_vimage);
    }
 
    //----------------------------------------------------------------------------------
@@ -1037,6 +997,10 @@ void Player::InitTableSession(const bool isInitial)
           || type == ItemTypeEnum::eItemHitTarget || type == ItemTypeEnum::eItemLight || type == ItemTypeEnum::eItemSpinner || type == ItemTypeEnum::eItemTrigger)
              editable->GetEventProxyBase()->FireVoidEvent(DISPID_AnimateEvents_Animate);
       }
+      // Dispatch pending plugin callbacks queued during script Init (e.g. emulators registering
+      // their state sources through RunOnMainThread) so that everything is visible before the
+      // option event handlers query them
+      m_pluginManager.ProcessAsyncCallbacks();
       m_ptable->FireOptionEvent(PinTable::OptionEventType::Initialized);
 
       if (m_detectScriptHang)
@@ -1063,6 +1027,82 @@ void Player::InitTableSession(const bool isInitial)
    m_tableSessionStartTime = (m_trackTableSessionStats && m_playing) ? usec() : 0;
    if (m_trackTableSessionStats)
       m_ptable->UpdateInfoFileOnGameStart();
+}
+
+void Player::LoadUsedTextures()
+{
+   m_usedTextures.clear();
+   if ((m_ptable->GetSettings().GetPlayer_CacheMode() <= 0) || !FileExists(m_ptable->m_filename))
+      return;
+   try
+   {
+      const std::filesystem::path path = g_app->m_fileLocator.GetTablePath(m_ptable, FileLocator::TableSubFolder::Cache, false) / "used_textures.xml"sv;
+      if (!FileExists(path))
+         return;
+      PLOGI << "Texture cache found at " << path;
+      std::stringstream buffer;
+      buffer << std::ifstream(path).rdbuf();
+      tinyxml2::XMLDocument xmlDoc;
+      const tinyxml2::XMLElement *const root = xmlDoc.Parse(buffer.str().c_str()) == tinyxml2::XML_SUCCESS ? xmlDoc.FirstChildElement("textures") : nullptr;
+      if (root == nullptr)
+         return;
+      for (const tinyxml2::XMLElement *node = root->FirstChildElement("texture"); node != nullptr; node = node->NextSiblingElement("texture"))
+      {
+         const char *const name = node->GetText();
+         bool linear;
+         if (name == nullptr || node->QueryBoolAttribute("linear", &linear) != tinyxml2::XML_SUCCESS)
+            continue; // Invalid entries are dropped on next save
+         m_usedTextures[name] = { linear, node->IntAttribute("age", 0) }; // Duplicates are merged
+      }
+   }
+   catch (...)
+   {
+      PLOGE << "Failed to load the used textures cache";
+      m_usedTextures.clear();
+   }
+}
+
+void Player::SaveUsedTextures()
+{
+   if ((m_ptable->GetSettings().GetPlayer_CacheMode() <= 0) || !FileExists(m_ptable->m_filename))
+      return;
+
+   // Age all entries, renew the ones drawn by the player, and drop the ones not drawn for 100 saves
+   for (auto &[name, entry] : m_usedTextures)
+      entry.age++;
+   for (ITexManCacheable *const memtex : m_renderer->m_renderDevice->m_texMan.GetUsedTextures())
+      if (const auto image = std::ranges::find_if(m_ptable->m_vimage, [memtex](const Texture *x) { return x == memtex; }); image != m_ptable->m_vimage.end() && !(*image)->m_name.empty())
+         m_usedTextures[(*image)->m_name] = { m_renderer->m_renderDevice->m_texMan.IsLinearRGB(memtex), 0 };
+   for (auto it = m_usedTextures.begin(); it != m_usedTextures.end();)
+      it = it->second.age >= 100 ? m_usedTextures.erase(it) : std::next(it);
+
+   try
+   {
+      const std::filesystem::path dir = g_app->m_fileLocator.GetTablePath(m_ptable, FileLocator::TableSubFolder::Cache, true);
+      if (dir.empty())
+         return;
+      vector<std::pair<string, UsedTexture>> entries(m_usedTextures.begin(), m_usedTextures.end());
+      std::ranges::sort(entries, {}, &std::pair<string, UsedTexture>::first); // Stable file content
+      tinyxml2::XMLDocument xmlDoc;
+      xmlDoc.InsertEndChild(xmlDoc.NewDeclaration());
+      tinyxml2::XMLElement *const root = xmlDoc.NewElement("textures");
+      xmlDoc.InsertEndChild(root);
+      for (const auto &[name, entry] : entries)
+      {
+         tinyxml2::XMLElement *const node = xmlDoc.NewElement("texture");
+         node->SetText(name.c_str());
+         node->SetAttribute("linear", entry.linear);
+         node->SetAttribute("age", entry.age);
+         root->InsertEndChild(node);
+      }
+      tinyxml2::XMLPrinter prn;
+      xmlDoc.Print(&prn);
+      std::ofstream(dir / "used_textures.xml"sv) << prn.CStr();
+   }
+   catch (...)
+   {
+      PLOGE << "Failed to save the used textures cache";
+   }
 }
 
 void Player::ShutdownTableSession()
@@ -1100,108 +1140,9 @@ void Player::ShutdownTableSession()
    // Save modified settings if any
    m_ptable->GetSettings().Save();
 
-   // Save list of used textures to avoid stuttering in next play
-   if ((m_ptable->GetSettings().GetPlayer_CacheMode() > 0) && FileExists(m_ptable->m_filename))
-   {
-      try
-      {
-         std::filesystem::path dir = g_app->m_fileLocator.GetTablePath(m_ptable, FileLocator::TableSubFolder::Cache, true);
-         tinyxml2::XMLDocument xmlDoc;
-         tinyxml2::XMLElement *root;
-         ankerl::unordered_dense::map<string, tinyxml2::XMLElement *> textureAge;
-         const std::filesystem::path path = dir.empty() ? dir : dir / "used_textures.xml"sv;
-         if (FileExists(path))
-         {
-            std::ifstream myFile(path);
-            std::stringstream buffer;
-            buffer << myFile.rdbuf();
-            myFile.close();
-            const string& xml = buffer.str();
-            if (xmlDoc.Parse(xml.c_str()) == tinyxml2::XML_SUCCESS)
-            {
-               vector<tinyxml2::XMLElement *> toRemove;
-               int age;
-               root = xmlDoc.FirstChildElement("textures");
-               for (tinyxml2::XMLElement *node = root->FirstChildElement("texture"); node != nullptr; node = node->NextSiblingElement())
-               {
-                  const char *name = node->GetText();
-                  if (name)
-                  {
-                     const string name_s = name;
-                     if (textureAge.count(name_s) == 1)
-                        toRemove.push_back(textureAge[name_s]);
-                     textureAge[name_s] = node;
-                     if (node->QueryIntAttribute("age", &age) == tinyxml2::XML_SUCCESS)
-                        node->SetAttribute("age", age + 1);
-                     else
-                        node->SetAttribute("age", 0);
-                  }
-                  else
-                  {
-                     toRemove.push_back(node);
-                  }
-               }
-               // Remove old entries (texture that were not used during a high number of play count)
-               for (auto it = textureAge.cbegin(); it != textureAge.cend();)
-               {
-                  if (it->second->QueryIntAttribute("age", &age) == tinyxml2::XML_SUCCESS && age >= 100)
-                  {
-                     toRemove.push_back(it->second);
-                     it = textureAge.erase(it);
-                  }
-                  else
-                  {
-                     ++it;
-                  }
-               }
-               // Delete too old, duplicates and invalid nodes
-               for (tinyxml2::XMLElement *node : toRemove)
-                  root->DeleteChild(node);
-            }
-         }
-         else
-         {
-            root = xmlDoc.NewElement("textures");
-            xmlDoc.InsertEndChild(xmlDoc.NewDeclaration());
-            xmlDoc.InsertEndChild(root);
-         }
-
-         vector<ITexManCacheable *> textures = m_renderer->m_renderDevice->m_texMan.GetLoadedTextures();
-         for (ITexManCacheable *memtex : textures)
-         {
-            const auto tex = std::ranges::find_if(m_ptable->m_vimage.begin(), m_ptable->m_vimage.end(), [&memtex](Texture *&x) { return (!x->m_name.empty()) && x == memtex; });
-            if (tex != m_ptable->m_vimage.end())
-            {
-               tinyxml2::XMLElement *node = textureAge[(*tex)->m_name];
-               if (node == nullptr)
-               {
-                  node = xmlDoc.NewElement("texture");
-                  node->SetText((*tex)->m_name.c_str());
-                  root->InsertEndChild(node);
-               }
-               node->DeleteAttribute("clampu");
-               node->DeleteAttribute("clampv");
-               node->DeleteAttribute("filter");
-               node->DeleteAttribute("prerender");
-               node->SetAttribute("linear", m_renderer->m_renderDevice->m_texMan.IsLinearRGB(memtex));
-               node->SetAttribute("age", 0);
-            }
-         }
-
-         if (!path.empty())
-         {
-            std::ofstream myfile(path);
-            tinyxml2::XMLPrinter prn;
-            xmlDoc.Print(&prn);
-            myfile << prn.CStr();
-            myfile.close();
-         }
-      }
-      catch (...)
-      {
-         PLOGE << "Failed to update list of texture used in table cache";
-      }
-   }
+   // Save the used textures for the next plays (once the editor was opened, they were saved just before it, see SaveUsedTextures)
+   if (!(m_liveUI && m_liveUI->m_editorUI.WasOpened()))
+      SaveUsedTextures();
 
    // Stop all sounds started during the session (on the default device, mirrored audio is stopped with the master)
    for (VPX::Sound *sound : m_ptable->m_vsound)
@@ -1912,6 +1853,33 @@ void Player::LockForegroundWindow(const bool enable)
 #endif
 }
 
+// Keyboard and text input events are emitted with the windowID of the window holding keyboard focus.
+// A window may hold keyboard input without being the foreground window (for example when the
+// application loses the foreground status during startup): SDL then reports the events with a
+// windowID of 0 (see https://github.com/libsdl-org/SDL/issues/13777). Re-associate them to the
+// window actually holding keyboard input so they are not filtered out by the per window dispatch,
+// eventually defaulting to the playfield window since a key event necessarily targets one of our windows.
+SDL_Window *Player::GetInputEventWindow(SDL_WindowID &windowID) const
+{
+   if (SDL_Window *wnd = SDL_GetWindowFromID(windowID); wnd != nullptr)
+      return wnd;
+#if defined(_WIN32)
+   const HWND focus = GetFocus();
+   for (VPX::Window *const wnd : { m_playfieldWnd, m_backglassOutput.GetWindow(), m_scoreViewOutput.GetWindow(), m_topperOutput.GetWindow() })
+   {
+      if (wnd && wnd->GetNativeHWND() == focus)
+      {
+         windowID = SDL_GetWindowID(wnd->GetCore());
+         return wnd->GetCore();
+      }
+   }
+#endif
+   SDL_Window *const playfield = m_playfieldWnd ? m_playfieldWnd->GetCore() : nullptr;
+   if (playfield)
+      windowID = SDL_GetWindowID(playfield);
+   return playfield;
+}
+
 //+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
 void Player::ProcessOSMessages(const bool isInitialized)
@@ -1967,13 +1935,9 @@ void Player::ProcessOSMessages(const bool isInitialized)
       }
 
       case SDL_EVENT_KEY_UP:
-      case SDL_EVENT_KEY_DOWN:
-         isPFWnd = (SDL_GetWindowFromID(e.key.windowID) == m_playfieldWnd->GetCore()) || IsVR();
-         break;
+      case SDL_EVENT_KEY_DOWN: isPFWnd = (GetInputEventWindow(e.key.windowID) == m_playfieldWnd->GetCore()) || IsVR(); break;
 
-      case SDL_EVENT_TEXT_INPUT:
-         isPFWnd = (SDL_GetWindowFromID(e.text.windowID) == m_playfieldWnd->GetCore()) || IsVR();
-         break;
+      case SDL_EVENT_TEXT_INPUT: isPFWnd = (GetInputEventWindow(e.text.windowID) == m_playfieldWnd->GetCore()) || IsVR(); break;
       case SDL_EVENT_MOUSE_WHEEL: isPFWnd = (SDL_GetWindowFromID(e.wheel.windowID) == m_playfieldWnd->GetCore()) || IsVR(); break;
       case SDL_EVENT_MOUSE_BUTTON_DOWN:
       case SDL_EVENT_MOUSE_BUTTON_UP:

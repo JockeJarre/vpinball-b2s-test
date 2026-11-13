@@ -30,6 +30,8 @@ set(VPX_TEST_SOURCES
    tests/input/test-scancodes.cpp
    tests/input/test-sensormapping.cpp
    tests/misc/test-collection.cpp
+   tests/misc/test-color.cpp
+   tests/misc/test-envmap-precalc.cpp
    tests/misc/test-material.cpp
    tests/misc/test-pinbinary.cpp
    tests/misc/test-pintable.cpp
@@ -68,6 +70,7 @@ set(VPX_TEST_SOURCES
    tests/physics/test-motion-kalman.cpp
    tests/physics/test-physics-defects.cpp
    tests/physics/test-physics-engine.cpp
+   tests/physics/test-physics-profile.cpp
    tests/physics/test-quadtree.cpp
    tests/plugins/alphadmd/test-alphanumeric.cpp
    tests/plugins/b2s/test-b2s-datamodel.cpp
@@ -85,6 +88,7 @@ set(VPX_TEST_SOURCES
    tests/render/test-vr-spaces.cpp
    tests/render/test-window.cpp
    tests/ui/test-arealayout.cpp
+   tests/ui/test-referenceimage.cpp
    tests/vpx-test.cpp
    tests/vpx-test.h
 )
@@ -189,8 +193,6 @@ if(PLATFORM STREQUAL "windows")
       dxguid.lib
       nvapi.lib
       winmm.lib
-      hid.lib
-      setupapi.lib
       dinput8.lib
       opusfile.lib
       opus.lib
@@ -359,7 +361,6 @@ elseif(PLATFORM STREQUAL "windows-mingw")
       SDL364
       SDL3_ttf64
       freeimage64
-      hidapi64
       openxr_loader64
       winevbs64
       opusfile
@@ -397,7 +398,6 @@ elseif(PLATFORM STREQUAL "windows-mingw")
          COMMAND "${CMAKE_COMMAND}" -E copy "${RUNTIME_LIBS_DIR}/SDL364.dll" "$<TARGET_FILE_DIR:vpx-test>"
          COMMAND "${CMAKE_COMMAND}" -E copy "${RUNTIME_LIBS_DIR}/SDL3_ttf64.dll" "$<TARGET_FILE_DIR:vpx-test>"
          COMMAND "${CMAKE_COMMAND}" -E copy "${RUNTIME_LIBS_DIR}/freeimage64.dll" "$<TARGET_FILE_DIR:vpx-test>"
-         COMMAND "${CMAKE_COMMAND}" -E copy "${RUNTIME_LIBS_DIR}/hidapi64.dll" "$<TARGET_FILE_DIR:vpx-test>"
          COMMAND "${CMAKE_COMMAND}" -E copy "${RUNTIME_LIBS_DIR}/openxr_loader64.dll" "$<TARGET_FILE_DIR:vpx-test>"
          COMMAND "${CMAKE_COMMAND}" -E copy "${RUNTIME_LIBS_DIR}/winevbs64.dll" "$<TARGET_FILE_DIR:vpx-test>"
          COMMAND "${CMAKE_COMMAND}" -E copy "${RUNTIME_LIBS_DIR}/libwinpthread-1.dll" "$<TARGET_FILE_DIR:vpx-test>"
@@ -475,7 +475,6 @@ elseif(PLATFORM STREQUAL "macos")
       SDL3
       SDL3_ttf
       freeimage
-      hidapi
       winevbs
       opusfile
       opus
@@ -588,7 +587,6 @@ elseif(PLATFORM STREQUAL "linux")
       SDL3
       SDL3_ttf
       freeimage
-      hidapi-hidraw
       winevbs
       opusfile
       opus
@@ -623,8 +621,6 @@ elseif(PLATFORM STREQUAL "linux")
          COMMAND cp -a "${RUNTIME_LIBS_DIR}/libSDL3_ttf.so.*" "$<TARGET_FILE_DIR:vpx-test>"
          COMMAND cp -a "${RUNTIME_LIBS_DIR}/libfreeimage.so" "$<TARGET_FILE_DIR:vpx-test>"
          COMMAND cp -a "${RUNTIME_LIBS_DIR}/libfreeimage.so.*" "$<TARGET_FILE_DIR:vpx-test>"
-         COMMAND cp -a "${RUNTIME_LIBS_DIR}/libhidapi-hidraw.so" "$<TARGET_FILE_DIR:vpx-test>"
-         COMMAND cp -a "${RUNTIME_LIBS_DIR}/libhidapi-hidraw.so.*" "$<TARGET_FILE_DIR:vpx-test>"
          COMMAND cp -a "${RUNTIME_LIBS_DIR}/libwinevbs.so" "$<TARGET_FILE_DIR:vpx-test>"
          COMMAND cp -a "${RUNTIME_LIBS_DIR}/libwinevbs.so.*" "$<TARGET_FILE_DIR:vpx-test>"
       )

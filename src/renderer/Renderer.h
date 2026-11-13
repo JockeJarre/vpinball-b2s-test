@@ -87,6 +87,10 @@ public:
    RenderView* GetActiveView() const { return m_activeView; }
    RenderView* GetPrimaryView() const { return m_primaryView.get(); }
    RenderView* GetVRMirrorView() const { return m_vrMirrorView.get(); }
+
+   // Computes the diffuse irradiance environment map used by platforms without GPU irradiance
+   // prefiltering (DX9, OpenGL ES, Apple, wasm, Android XR). Stateless, shared by all CPU paths.
+   static std::shared_ptr<BaseTexture> EnvmapPrecalc(const std::shared_ptr<const BaseTexture>& envTex, const unsigned int rad_env_xres, const unsigned int rad_env_yres);
    const vector<RenderView*>& GetViews() const { return m_renderViews; }
    RenderView* CreateEditorView(); // Registers a Kind::Editor view (an editor viewport drawing to its area of a shared output)
    void ReleaseEditorView(RenderView* view); // Unregisters a view made by CreateEditorView (destroyed at the next frame's record start)
@@ -130,13 +134,18 @@ public:
       return m_activeView->BackdropToClip(pos);
    } // Maps a point in desktop backdrop coordinates (0..EDITOR_BG_WIDTH, 0..EDITOR_BG_HEIGHT) to clip space, going through the editor's orthographic camera when editing the backdrop in the live editor, or to the full render target otherwise
 
-   void MarkShaderDirty() { m_shaderDirty = true; }
+   void MarkShaderDirty()
+   {
+      m_shaderDirty = true;
+      MarkStaticsDirty(); // The shader state (lighting, materials) is baked into the static part prerender
+   }
    void UpdateBasicShaderMatrix(const Matrix3D& objectTrafo = Matrix3D::MatrixIdentity()) { m_activeView->UpdateBasicShaderMatrix(objectTrafo); }
    void UpdateBallShaderMatrix() { m_activeView->UpdateBallShaderMatrix(); }
    void UpdateDesktopBackdropShaderMatrix(bool basic, bool light, bool flasherDMD) { m_activeView->UpdateDesktopBackdropShaderMatrix(basic, light, flasherDMD); }
    void UpdateStereoShaderState();
 
    void DisableStaticPrePass(const bool disable); // Disable static part prerendering on all views (reference counted)
+   void MarkStaticsDirty(); // The accumulated static part prerender of the views is stale (scene content or lighting changed): re-accumulate it on the next render
    bool IsUsingStaticPrepass() const { return m_activeView->IsUsingStaticPrepass(); }
    bool IsTemporalAccumulationInProgress() const
    {
@@ -209,20 +218,29 @@ public:
    void DrawWireframe(IEditable* const renderable, const vec4& fillColor, const vec4& edgeColor, bool withDepthMask);
    void RenderMesh(const unsigned int renderMask, RenderMeshDesc& draw, const VisualMaterial& mat);
 
+   // The queued renderable updates all invalidate the accumulated static part prerender of the views
    void ReinitRenderable(IRenderable* part)
    {
       if (part)
+      {
          m_renderableToInit.push_back(part);
+         MarkStaticsDirty();
+      }
    }
    void SetupRenderable(IRenderable* part)
    {
       if (part)
+      {
          m_renderableToSetup.push_back(part);
+         MarkStaticsDirty();
+      }
    }
    void DropRenderable(IRenderable* part)
    {
       std::erase(m_renderableToInit, part);
       std::erase(m_renderableToSetup, part);
+      if (part)
+         MarkStaticsDirty();
    }
 
    void SetTable(PinTable* table); // Rebind to a new table (currently limited to base table / live copy swaps)
@@ -373,8 +391,6 @@ public:
    RenderTarget* GetOffscreenVR(int eye) const { return m_activeView->GetOffscreenVR(eye); }
    RenderTarget* GetBackBufferTexture() const { return m_activeView->GetBackBufferTexture(); } // Main render target, with MSAA resolved if any, also may have stereo output (2 viewports)
 
-   unsigned int GetPlayerModeVisibilityMask() const { return m_activeView->m_visibilityMask; }
-
    // Renders a single part into the current pass, e.g. for editor previews of parts that are not (yet) in the table
    void RenderItem(IEditable* const renderable, bool isNoBackdrop);
 
@@ -384,7 +400,6 @@ public:
 private:
    void SetSpaceReference(PartGroupData::SpaceReference spaceReference, bool force) { m_activeView->SetSpaceReference(spaceReference, force); }
    bool IsBloomEnabled() const;
-   std::shared_ptr<BaseTexture> EnvmapPrecalc(const std::shared_ptr<const BaseTexture>& envTex, const unsigned int rad_env_xres, const unsigned int rad_env_yres);
 
    // Per view render target accessors, delegated to the active view (used by ancillary and postprocess helpers)
    RenderTarget* GetMSAABackBufferTexture() const { return m_activeView->GetMSAABackBufferTexture(); }
@@ -424,7 +439,7 @@ private:
    bool m_ancillaryWndRendered[VPXWindowId::VPXWINDOW_Topper + 1] = {}; // Whether a renderer claimed the window on the last frame
    bool m_ancillaryWndAdjusted[VPXWindowId::VPXWINDOW_Topper + 1] = {}; // Whether the window's display settings page was open on the last frame
    uint32_t m_ancillaryWndShowTime[VPXWindowId::VPXWINDOW_Topper + 1] = {}; // msec() of the last lazy show (a demotion is only repaired shortly after it)
-   uint64_t m_ancillaryWndLastRenderTime[VPXWindowId::VPXWINDOW_Topper + 1] = {}; // usec() of the last OM_WINDOW render pass (per display refresh rate throttling)
+   int64_t m_ancillaryWndNextRenderTime[VPXWindowId::VPXWINDOW_Topper + 1] = {}; // usec() deadline of the next OM_WINDOW render pass (per display refresh rate throttling)
    RenderTarget* m_ancillaryWndLastRT[VPXWindowId::VPXWINDOW_Topper + 1] = {}; // Backbuffer of the last OM_WINDOW render pass; a change (swapchain recreation) forces a render
    int m_ancillaryWndRotation[VPXWindowId::VPXWINDOW_Topper + 1] = {}; // Live rotation of the window content, in clockwise degrees
    bool m_ancillaryLayering { false }; // Live value of the ancillary window renderer layering master switch, see SetAncillaryLayering

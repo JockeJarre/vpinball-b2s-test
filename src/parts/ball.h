@@ -81,7 +81,43 @@ public:
       }
       return false;
    }
+
 };
+
+// Accumulates the exact clip space bounds of the unit sphere through the given object to clip space transform (row vectors),
+// that is of the ellipsoid it maps to (anti stretch): the raytraced ball impostor quad. zMin receives the nearest projected
+// depth. Returns false when the ellipsoid reaches the camera plane (the bounds are then unusable).
+// A clip space plane x = s w is tangent to the ellipsoid when its object space plane c_x - s c_w (c_k: column k of toClip)
+// is tangent to the unit sphere, that is when (c_x - s c_w) Q (c_x - s c_w) = 0 with Q = diag(1, 1, 1, -1): a quadratic in
+// s, whose two roots are the bounds (likewise for y and z).
+inline bool AccumulateUnitSphereClipBounds(const Matrix3D &toClip, float &xMin, float &xMax, float &yMin, float &yMax, float &zMin)
+{
+   const auto column = [&toClip](const int k) { return std::array<double, 4> { toClip.m[0][k], toClip.m[1][k], toClip.m[2][k], toClip.m[3][k] }; };
+   const auto dotQ = [](const std::array<double, 4> &a, const std::array<double, 4> &b) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2] - a[3] * b[3]; };
+   const std::array<double, 4> cw = column(3);
+   // Nearest w of the ellipsoid: w of its center minus the length of the w gradient
+   if (cw[3] - sqrt(cw[0] * cw[0] + cw[1] * cw[1] + cw[2] * cw[2]) <= 1e-3)
+      return false;
+   const double a = dotQ(cw, cw); // < 0 as the camera plane misses the ellipsoid
+   const auto roots = [&](const int k, double &s0, double &s1)
+   {
+      const std::array<double, 4> ck = column(k);
+      const double b = dotQ(ck, cw);
+      const double r = sqrt(max(b * b - a * dotQ(ck, ck), 0.));
+      s0 = (b + r) / a; // a < 0: the smaller root
+      s1 = (b - r) / a;
+   };
+   double s0, s1;
+   roots(0, s0, s1);
+   xMin = min(xMin, static_cast<float>(s0));
+   xMax = max(xMax, static_cast<float>(s1));
+   roots(1, s0, s1);
+   yMin = min(yMin, static_cast<float>(s0));
+   yMax = max(yMax, static_cast<float>(s1));
+   roots(2, s0, s1);
+   zMin = min(zMin, static_cast<float>(s0));
+   return true;
+}
 
 class BallData final : public BaseProperty
 {

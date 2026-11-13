@@ -8,10 +8,10 @@
 #include "core/Settings.h"
 #include "core/player.h"
 #include "physics/PhysicsEngine.h"
+#include "ui/live/ImGuiHelpers.h"
 #include "ui/live/LiveUI.h"
 #include "EditorTheme.h"
-#include "IconsLucide.h"
-#include "fonts/IconsForkAwesome.h"
+#include "ui/live/IconsLucide.h"
 #include "OutlinerPanel.h"
 #include "Selection.h"
 #include "core/ieditable.h"
@@ -34,6 +34,28 @@ void BlueprintPane::OnUnhosted()
       m_editor.m_hoverBp = nullptr;
    if (m_editor.m_captureBp == this)
       m_editor.m_captureBp = nullptr;
+   CancelGizmoDrag();
+}
+
+void BlueprintPane::CancelGizmoDrag()
+{
+   ImGuizmo::PushID(this);
+   if (ImGuizmo::IsUsing())
+   {
+      ImGuizmo::Enable(false);
+      ImGuizmo::Enable(true);
+   }
+   ImGuizmo::PopID();
+   if (m_gizmoDragActive)
+   {
+      m_gizmoDragActive = false;
+      m_gizmoDragSelection.clear();
+      if (m_editor.m_lastUndoId == 0x1000)
+      {
+         m_editor.m_lastUndoPart = nullptr;
+         m_editor.m_lastUndoId = 0;
+      }
+   }
 }
 
 ImVec2 BlueprintPane::Project(const Vertex2D& v) const
@@ -70,26 +92,16 @@ void BlueprintPane::FitTable()
 
 void BlueprintPane::FrameSelection()
 {
-   if (m_editor.m_multiSel.empty())
+   // Zoom & offset framing the selection bounds in the table XY plane (the top-down counterpart
+   // of the 3D view's FrameSelection: the part extents count, not only their centers)
+   FRect3D bounds;
+   if (!m_editor.GetSelectionBounds(bounds))
       return;
-   Vertex2D lo(FLT_MAX, FLT_MAX), hi(-FLT_MAX, -FLT_MAX);
-   for (const auto& part : m_editor.m_multiSel)
-   {
-      Matrix3D transform;
-      if (part->GetTransform(transform) == EditorUIPart::TM_None)
-         continue;
-      const Vertex3Ds pos = transform.GetOrthoNormalPos();
-      lo.x = min(lo.x, pos.x);
-      lo.y = min(lo.y, pos.y);
-      hi.x = max(hi.x, pos.x);
-      hi.y = max(hi.y, pos.y);
-   }
-   if (lo.x > hi.x)
-      return;
-   m_offset = Vertex2D(0.5f * (lo.x + hi.x), 0.5f * (lo.y + hi.y));
-   const float w = max(hi.x - lo.x, 50.f), h = max(hi.y - lo.y, 50.f);
+   m_offset = Vertex2D(0.5f * (bounds.left + bounds.right), 0.5f * (bounds.top + bounds.bottom));
+   const float w = max(bounds.right - bounds.left, 50.f), h = max(bounds.bottom - bounds.top, 50.f);
    if (m_imageRect.Width() > 0.f && m_imageRect.Height() > 0.f)
       m_zoom = clamp(0.8f * min(m_imageRect.Width() / w, m_imageRect.Height() / h), 0.1f, 64.f);
+   m_setupValid = true;
 }
 
 nlohmann::json BlueprintPane::SaveSetup() const
@@ -175,7 +187,7 @@ void BlueprintPane::RenderScene(ImDrawList* const drawList)
    ctx.SetPass(BlueprintRenderContext::Pass::Fill);
    for (IEditable* const editable : table->GetParts())
    {
-      if (editable->m_desktopBackdrop || !editable->IsUIVisible(false))
+      if (editable->m_desktopBackdrop || !editable->IsUIVisible(true))
          continue;
       const auto it = m_editor.m_editableMap.find(editable);
       if (it != m_editor.m_editableMap.end())
@@ -184,7 +196,7 @@ void BlueprintPane::RenderScene(ImDrawList* const drawList)
    RenderGhostParts(ctx);
 
    // 4. Grid (below the outlines, clipped to the playfield bounds)
-   const float gridSize = settings.GetEditor_GridSize();
+   const float gridSize = static_cast<float>(settings.GetEditor_GridSize());
    if (table->m_winEditorGrid && gridSize > 0.f)
    {
       // Visible table rect clipped to the playfield bounds (same as the win32 view)
@@ -207,7 +219,7 @@ void BlueprintPane::RenderScene(ImDrawList* const drawList)
    ctx.SetPass(BlueprintRenderContext::Pass::Outline);
    for (IEditable* const editable : table->GetParts())
    {
-      if (editable->m_desktopBackdrop || !editable->IsUIVisible(false))
+      if (editable->m_desktopBackdrop || !editable->IsUIVisible(true))
          continue;
       const auto it = m_editor.m_editableMap.find(editable);
       if (it != m_editor.m_editableMap.end())
@@ -246,7 +258,7 @@ void BlueprintPane::HitTestParts(const ImVec2& pos, vector<BlueprintHitContext::
       ctx.SetPass(pass);
       for (IEditable* const editable : m_editor.m_table->GetParts())
       {
-         if (editable->m_desktopBackdrop || !editable->IsUIVisible(false) || !m_editor.IsEditablePickable(editable))
+         if (editable->m_desktopBackdrop || !editable->IsUIVisible(true) || !m_editor.IsEditablePickable(editable, false))
             continue;
          const auto it = m_editor.m_editableMap.find(editable);
          if (it != m_editor.m_editableMap.end())
@@ -269,7 +281,7 @@ void BlueprintPane::BoxSelectParts(const ImVec2& cornerA, const ImVec2& cornerB,
       ctx.SetPass(pass);
       for (IEditable* const editable : m_editor.m_table->GetParts())
       {
-         if (editable->m_desktopBackdrop || !editable->IsUIVisible(false) || !m_editor.IsEditablePickable(editable))
+         if (editable->m_desktopBackdrop || !editable->IsUIVisible(true) || !m_editor.IsEditablePickable(editable, false))
             continue;
          const auto it = m_editor.m_editableMap.find(editable);
          if (it != m_editor.m_editableMap.end())
@@ -394,6 +406,7 @@ void BlueprintPane::RenderPane(const AreaRect& rect, const int leafId)
    drawList->ChannelsSplit(2);
    drawList->ChannelsSetCurrent(1);
    ImGui::SetCursorPos(ImVec2(pad, pad));
+   ImGui::BeginGroup(); // Item rect bounds all the header controls: the bar height is the tallest one's bottom (same as ViewportPane)
 
    editor.RenderAreaTypeButton(leafId);
    ImGui::SameLine();
@@ -407,18 +420,20 @@ void BlueprintPane::RenderPane(const AreaRect& rect, const int leafId)
          const char* icon;
          const char* tooltip;
       } editModes[] = {
-         { (ImGuizmo::OPERATION)0, ICON_FK_MOUSE_POINTER, "Select\n[Esc]" }, //
-         { ImGuizmo::TRANSLATE, ICON_FK_ARROWS, "Grab\n[G]" }, //
-         { ImGuizmo::SCALE, ICON_FK_EXPAND, "Scale\n[S]" }, //
-         { ImGuizmo::ROTATE, ICON_FK_REPEAT, "Rotate\n[R]" }, //
+         { (ImGuizmo::OPERATION)0, ICON_LC_MOUSE_POINTER_2, "Select\n[Esc]" }, //
+         { ImGuizmo::TRANSLATE, ICON_LC_MOVE_3D, "Grab\n[G]" }, //
+         { ImGuizmo::SCALE, ICON_LC_SCALE_3D, "Scale\n[S]" }, //
+         { ImGuizmo::ROTATE, ICON_LC_ROTATE_3D, "Rotate\n[R]" }, //
       };
       for (const auto& mode : editModes)
       {
          const bool active = (m_gizmoOperation == mode.operation);
          if (active)
             ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
-         if (ImGui::Button(mode.icon))
+         ImGui::PushID(static_cast<int>(mode.operation));
+         if (IconButtonInk(mode.icon, "##EditMode"))
             SetGizmoOperation(mode.operation);
+         ImGui::PopID();
          if (active)
             ImGui::PopStyleColor();
          if (ImGui::IsItemHovered())
@@ -433,7 +448,7 @@ void BlueprintPane::RenderPane(const AreaRect& rect, const int leafId)
       const bool addPartActive = (editor.m_addPartType != eItemInvalid);
       if (addPartActive)
          ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
-      if (ImGui::Button(ICON_FK_PLUS))
+      if (IconButtonInk(ICON_LC_PLUS, "##AddPart"))
          editor.RequestAddPartPopup(ImGui::GetMousePos());
       if (addPartActive)
          ImGui::PopStyleColor();
@@ -445,14 +460,14 @@ void BlueprintPane::RenderPane(const AreaRect& rect, const int leafId)
 
    // Right side of the header: view options popover and fit view button
    const ImGuiStyle& style = ImGui::GetStyle();
-   const float rightW = ImGui::CalcTextSize(ICON_FK_STICKY_NOTE, nullptr, true).x + style.FramePadding.x * 2.0f //
+   const float rightW = IconButtonInkSize(ICON_LC_STICKY_NOTE).x //
       + ImGui::CalcTextSize("Fit", nullptr, true).x + style.FramePadding.x * 2.0f //
       + style.ItemSpacing.x * 2.0f;
    const float rightX = rect.Width() - pad - rightW;
    ImGui::SameLine();
    if (rightX > ImGui::GetCursorPosX())
       ImGui::SetCursorPosX(rightX);
-   if (ImGui::Button(ICON_FK_STICKY_NOTE)) // View options popover (shared with the win32 editor view)
+   if (IconButtonInk(ICON_LC_STICKY_NOTE, "##ViewOptions")) // View options popover (shared with the win32 editor view)
       ImGui::OpenPopup("Overlay Popup");
    if (ImGui::BeginPopup("Overlay Popup"))
    {
@@ -473,10 +488,11 @@ void BlueprintPane::RenderPane(const AreaRect& rect, const int leafId)
       ImGui::EndPopup();
    }
    ImGui::SameLine();
-   if (ImGui::Button("Fit"))
+   if (ImGui::Button("Fit", ImVec2(0.f, IconButtonInkSize(ICON_LC_STICKY_NOTE).y))) // Same height as the icon buttons (IconButtonInkSize), as in ViewportPane's header
       FitTable();
    if (ImGui::IsItemHovered())
       ImGui::SetTooltip("Fit view on the playfield\n[Home]");
+   ImGui::EndGroup();
 
    const float headerBottom = ImGui::GetItemRectMax().y + pad;
    drawList->ChannelsSetCurrent(0);
@@ -494,24 +510,7 @@ void BlueprintPane::RenderPane(const AreaRect& rect, const int leafId)
    ImGui::SetNextWindowPos(editor.m_addPartPopupPos, ImGuiCond_Appearing);
    if (ImGui::BeginPopup("Add Part"))
    {
-      editor.EnsureAddPartButtons();
-      const float iconSize = ImGui::GetFrameHeight();
-      int column = 0;
-      for (const auto& button : editor.m_addPartButtons)
-      {
-         if (button.icon == nullptr)
-            continue;
-         if (column > 0)
-            ImGui::SameLine();
-         if (ImGui::ImageButton(button.name, button.icon, ImVec2(iconSize, iconSize)))
-         {
-            editor.m_addPartType = button.type;
-            ImGui::CloseCurrentPopup();
-         }
-         if (ImGui::IsItemHovered())
-            ImGui::SetTooltip("Add %s", button.name);
-         column = (column + 1) % 5;
-      }
+      editor.RenderAddPartPicker();
       ImGui::EndPopup();
    }
 
@@ -558,16 +557,23 @@ void BlueprintPane::RenderPane(const AreaRect& rect, const int leafId)
       ImGui::Text("Blueprint (x%.1f)", m_zoom);
       if (m_hovered)
       {
-         // Cursor position in table coordinates (the win32 status bar position readout)
+         // Cursor position in table coordinates (the win32 status bar position readout), shown in the selected units
          const Vertex2D cur = Unproject(ImGui::GetMousePos());
-         ImGui::Text("%.1f, %.1f", cur.x, cur.y);
+         char pos[64];
+         switch (editor.m_units)
+         {
+         case EditorUI::Units::Metric: snprintf(pos, sizeof(pos), "%.1f, %.1f mm", VPUTOMM(cur.x), VPUTOMM(cur.y)); break;
+         case EditorUI::Units::Imperial: snprintf(pos, sizeof(pos), "%.1f, %.1f in", VPUTOINCHES(cur.x), VPUTOINCHES(cur.y)); break;
+         default: snprintf(pos, sizeof(pos), "%.1f, %.1f", cur.x, cur.y); break;
+         }
+         ImGui::TextUnformatted(pos);
       }
       if (m_gizmoOperation == ImGuizmo::TRANSLATE)
-         ImGui::TextUnformatted(ICON_FK_ARROWS " Grab");
+         ImGui::TextUnformatted(ICON_LC_MOVE_3D " Grab");
       else if (m_gizmoOperation == ImGuizmo::SCALE)
-         ImGui::TextUnformatted(ICON_FK_EXPAND " Scale");
+         ImGui::TextUnformatted(ICON_LC_SCALE_3D " Scale");
       else if (m_gizmoOperation == ImGuizmo::ROTATE)
-         ImGui::TextUnformatted(ICON_FK_REPEAT " Rotate");
+         ImGui::TextUnformatted(ICON_LC_ROTATE_3D " Rotate");
       if (editor.GetTargetBlueprint() == this && editor.m_pointEditPart)
          ImGui::TextUnformatted(editor.m_pointEditCenter ? "Center Edit (Tab to exit)" : "Drag Point Edit (Tab to exit)");
       ImGui::End();
@@ -594,10 +600,18 @@ void BlueprintPane::RenderUI(ImDrawList* const overlayDrawList)
    ImGuizmo::SetOrthographic(true);
    ImGuizmo::SetRect(m_imageRect.x0, m_imageRect.y0, m_imageRect.Width(), m_imageRect.Height());
    ImGuizmo::SetAlternativeWindow(m_window);
+   // The blueprint shows the 3D scene parts: no gizmo for a desktop backdrop selection. A drag whose selection left the 3D
+   // scene is canceled, outside of this pane's gizmo id scope (CancelGizmoDrag pushes it)
+   const bool isSelectionInViewDomain = editor.IsSelectionInViewDomain(false);
+   if (!isSelectionInViewDomain)
+      CancelGizmoDrag();
+   // Each pane uses its own gizmo id: with a shared one, every pane's Manipulate would continue a drag started in
+   // another pane, through its own camera. Up to PopID, Enable and IsUsing only apply to this pane's gizmo
+   ImGuizmo::PushID(this);
 
    Matrix3D transform;
    const bool isSelectionTransformValid = editor.GetSelectionTransform(transform);
-   if (isSelectionTransformValid && !editor.m_table->IsLocked())
+   if (isSelectionTransformValid && isSelectionInViewDomain && !editor.m_table->IsLocked())
    {
       const float w2 = m_imageRect.Width() * 0.5f / m_zoom, h2 = m_imageRect.Height() * 0.5f / m_zoom;
       Matrix3D view = Matrix3D::MatrixLookAtRH(vec3(m_offset.x, m_offset.y, -1000.f), vec3(m_offset.x, m_offset.y, 0.f), vec3(0.f, -1.f, 0.f));
@@ -641,13 +655,24 @@ void BlueprintPane::RenderUI(ImDrawList* const overlayDrawList)
       ImGuizmo::Enable(false);
       ImGuizmo::Enable(true);
    }
-   if (editor.m_lastUndoId == 0x1000 && !ImGuizmo::IsUsing())
+   // Once this pane's gizmo is released, its drag ends with the undo deduplication (a single undo record per drag). The undo
+   // marker is shared: it is released by the pane owning the drag, or by any pane once no drag is left
+   if (m_gizmoDragActive && !ImGuizmo::IsUsing())
    {
       m_gizmoDragActive = false;
       m_gizmoDragSelection.clear();
+      if (editor.m_lastUndoId == 0x1000)
+      {
+         editor.m_lastUndoPart = nullptr;
+         editor.m_lastUndoId = 0;
+      }
+   }
+   else if (editor.m_lastUndoId == 0x1000 && !ImGuizmo::IsUsingAny())
+   {
       editor.m_lastUndoPart = nullptr;
       editor.m_lastUndoId = 0;
    }
+   ImGuizmo::PopID();
 
    // Overlays: selection pivot dot + the box select rect (the rest is inside the blueprint passes)
    overlayDrawList->PushClipRect(ImVec2(m_imageRect.x0, m_imageRect.y0), ImVec2(m_imageRect.x1, m_imageRect.y1), true);
@@ -661,8 +686,12 @@ void BlueprintPane::RenderUI(ImDrawList* const overlayDrawList)
       const ImVec2 end = ImGui::GetMousePos();
       if (fabsf(end.x - m_boxSelectStart.x) > 2.f || fabsf(end.y - m_boxSelectStart.y) > 2.f)
       {
-         overlayDrawList->AddRectFilled(m_boxSelectStart, end, IM_COL32(255, 128, 0, 32));
-         overlayDrawList->AddRect(m_boxSelectStart, end, IM_COL32(255, 128, 0, 255));
+         // Normalize the corners: an inverted rect (dragging up or left) emits back-facing
+         // triangles which the renderer culls, leaving the frame invisible
+         const ImVec2 lo(min(m_boxSelectStart.x, end.x), min(m_boxSelectStart.y, end.y));
+         const ImVec2 hi(max(m_boxSelectStart.x, end.x), max(m_boxSelectStart.y, end.y));
+         overlayDrawList->AddRectFilled(lo, hi, IM_COL32(255, 128, 0, 32));
+         overlayDrawList->AddRect(lo, hi, IM_COL32(255, 128, 0, 255));
       }
    }
    overlayDrawList->PopClipRect();
@@ -709,7 +738,7 @@ void BlueprintPane::RenderUI(ImDrawList* const overlayDrawList)
             if (dx * dx + dy * dy <= 100.f * dpi * dpi)
             {
                editor.m_centerSelected = io.KeyShift ? !editor.m_centerSelected : true;
-               editor.m_pointDragPending = editor.m_centerSelected;
+               editor.m_pointDragPending = editor.m_centerSelected && !editor.m_pointEditPart->GetEditable()->IsUILocked();
                editor.m_pointDragZ = editor.m_pointEditPart->GetEditCenter().z;
                editor.m_pointDragPos = Unproject(m_boxSelectStart);
             }
@@ -736,7 +765,7 @@ void BlueprintPane::RenderUI(ImDrawList* const overlayDrawList)
                      editor.m_pointSel.clear();
                      editor.m_pointSel.push_back(hitPoint);
                   }
-                  editor.m_pointDragPending = editor.IsPointSelected(hitPoint) && !hitPoint->m_uiLocked;
+                  editor.m_pointDragPending = editor.IsPointSelected(hitPoint) && !hitPoint->m_uiLocked && !editor.m_pointEditPart->GetEditable()->IsUILocked();
                   editor.m_pointDragZ = editor.m_pointEditPart->GetDragPointZ(hitPoint);
                   editor.m_pointDragPos = Unproject(m_boxSelectStart);
                }
@@ -746,7 +775,7 @@ void BlueprintPane::RenderUI(ImDrawList* const overlayDrawList)
             else if (!hits.empty())
             {
                const BlueprintHitContext::Hit& top = hits.back();
-               if (top.point != nullptr && !top.point->m_uiLocked)
+               if (top.point != nullptr && !top.point->m_uiLocked && !top.part->GetEditable()->IsUILocked())
                {
                   // Direct drag of a drag point handle of a selected part (win32 behavior)
                   m_dragPart = Resolve(top.part);
@@ -1009,9 +1038,12 @@ void BlueprintPane::RenderUI(ImDrawList* const overlayDrawList)
       editor.m_pointDragActive = false;
    }
 
-   // Pane keyboard actions: gizmo ops, drag point edit, mode cancels
+   // Pane keyboard actions: gizmo ops, drag point edit, view framing, mode cancels
    if (editor.GetTargetBlueprint() == this && !io.WantCaptureKeyboard && editor.m_fileOp == nullptr)
    {
+      // Emulate numpad (navigation preference, same as the 3D view): the top row keys act as the numpad view keys
+      const bool emulateNumpad = editor.m_navEmulateNumpad && !io.KeyAlt;
+      const auto padKey = [emulateNumpad](const ImGuiKey pad, const ImGuiKey digit) { return ImGui::IsKeyPressed(pad) || (emulateNumpad && ImGui::IsKeyPressed(digit)); };
       if (ImGui::IsKeyReleased(ImGuiKey_Escape))
       {
          if (editor.m_suppressNextEscape)
@@ -1029,8 +1061,6 @@ void BlueprintPane::RenderUI(ImDrawList* const overlayDrawList)
             editor.m_partLibrary.CancelPlacement();
          else if (editor.m_pointEditPart)
             editor.ExitPointEditMode(true);
-         else if (editor.m_selection.GetType() != Selection::S_NONE)
-            editor.ClearSelection();
       }
       else if (ImGui::IsKeyPressed(ImGuiKey_Tab, false) && !io.KeyCtrl && !io.KeyAlt && !io.KeyShift)
       {
@@ -1093,15 +1123,15 @@ void BlueprintPane::RenderUI(ImDrawList* const overlayDrawList)
          else if (!io.KeyCtrl)
             SetGizmoOperation(ImGuizmo::ROTATE);
       }
-      else if (ImGui::IsKeyPressed(ImGuiKey_KeypadDecimal))
-         FrameSelection();
-      else if (ImGui::IsKeyPressed(ImGuiKey_Home))
-         FitTable();
-      else if (!io.WantTextInput
+      else if (padKey(ImGuiKey_KeypadDecimal, ImGuiKey_Period))
+         FrameSelection(); // Frame the selection (Blender's View Selected)
+      else if (ImGui::IsKeyPressed(ImGuiKey_Home) && !io.KeyCtrl && !io.KeyAlt && !io.KeyShift)
+         FitTable(); // Fit the whole table (Blender's View All)
+      else if (!io.WantTextInput && editor.IsSelectionInViewDomain(false)
          && (ImGui::IsKeyPressed(ImGuiKey_LeftArrow, true) || ImGui::IsKeyPressed(ImGuiKey_RightArrow, true) || ImGui::IsKeyPressed(ImGuiKey_UpArrow, true)
             || ImGui::IsKeyPressed(ImGuiKey_DownArrow, true)))
       {
-         // Nudge the selection by 1 display px (10 with Shift), like the win32 arrow keys
+         // Nudge a 3D scene selection by 1 display px (10 with Shift), like the win32 arrow keys
          const float distance = (io.KeyShift ? 10.f : 1.f) / m_zoom;
          const Vertex2D delta(ImGui::IsKeyDown(ImGuiKey_RightArrow) ? distance : (ImGui::IsKeyDown(ImGuiKey_LeftArrow) ? -distance : 0.f),
             ImGui::IsKeyDown(ImGuiKey_DownArrow) ? distance : (ImGui::IsKeyDown(ImGuiKey_UpArrow) ? -distance : 0.f));

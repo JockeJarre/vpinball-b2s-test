@@ -1,6 +1,6 @@
 #pragma once
 
-#include "fonts/IconsForkAwesome.h"
+#include "ui/live/IconsLucide.h"
 #include "utils/fileio.h"
 #include "parts/Sound.h"
 #include "parts/pintable.h"
@@ -10,7 +10,11 @@
 #include "imgui/imgui.h"
 #include "imgui/imgui_stdlib.h"
 #include "imgui/imgui_internal.h"
+#include "ui/live/ImGuiHelpers.h"
 #include "ResURIPicker.h"
+
+class Sampler;
+class PartGroup;
 
 namespace VPX::EditorUI
 {
@@ -20,6 +24,11 @@ template <class T> using PartData = std::remove_cv_t<std::remove_reference_t<dec
 
 class PropertyPane final
 {
+   // Shared handling of fields that can be synchronized between a live table and its startup
+   // version, and co-edited parts of a uniform-type multi selection (defined below)
+   template <class T> struct SyncField;
+   template <class T> struct CoTarget;
+
 public:
    PropertyPane(PinTable* table);
    ~PropertyPane();
@@ -56,9 +65,23 @@ public:
 
    void Header(const string& typeName, const std::function<string()>& getName, const std::function<void(const string&)>& setName);
    void EditableHeader(const string& typeName, IEditable* editable);
+   void TableHeader(PinTable* table); // The table's own header (the same row as the parts': icon picker, name field, lock toggle)
+   // A locked part's pane is disabled by EditableHeader: close that scope after the pane's fields
+   void EndEditScope()
+   {
+      if (m_lockScope)
+      {
+         ImGui::EndDisabled();
+         m_lockScope = false;
+      }
+   }
    void Separator(const string& label) const;
    template <class T> void Checkbox(T* obj, const string& label, const std::function<bool(const T*)>& getter, const std::function<void(T*, bool)>& setter, const char* tooltip = nullptr);
    template <class T> void InputInt(T* obj, const string& label, const std::function<int(const T*)>& getter, const std::function<void(T*, int)>& setter, const char* tooltip = nullptr);
+   template <class T>
+   void SliderInt(T* obj, const string& label, int minValue, int maxValue, const std::function<int(const T*)>& getter, const std::function<void(T*, int)>& setter, const char* tooltip = nullptr);
+   // Action on the part(s), recorded like a field edit (one undo step)
+   template <class T> void Button(T* obj, const string& label, const std::function<void(T*)>& action, const char* tooltip = nullptr);
    template <class T>
    void InputFloat(
       T* obj, const string& label, const std::function<float(const T*)>& getter, const std::function<void(T*, float)>& setter, Unit unit, int nDecimals, const char* tooltip = nullptr);
@@ -75,9 +98,10 @@ public:
    template <class T>
    void InputResURI(T* obj, const string& label, const std::function<string(const T*)>& getter, const std::function<void(T*, const string&)>& setter, ResURIKind kind,
       const char* tooltip = nullptr, DisplayFamily displayFamily = DisplayFamily::Any, int semanticType = -1, bool writableOnly = false, int dataFormat = CTLPI_STATE_FORMAT_FLOAT);
+   // trailing, when provided, is rendered on the same line after the combo, inside the field column
    template <class T>
-   void Combo(
-      T* obj, const string& label, const std::vector<string>& values, const std::function<int(const T*)>& getter, const std::function<void(T*, int)>& setter, const char* tooltip = nullptr);
+   void Combo(T* obj, const string& label, const std::vector<string>& values, const std::function<int(const T*)>& getter, const std::function<void(T*, int)>& setter,
+      const char* tooltip = nullptr, const std::function<void(const SyncField<T>&, const vector<CoTarget<T>>&)>& trailing = nullptr);
    template <class T>
    void ImageCombo(T* obj, const string& label, const std::function<string(const T*)>& getter, const std::function<void(T*, const string&)>& setter, const char* tooltip = nullptr);
    template <class T>
@@ -146,10 +170,16 @@ public:
    }
 
 private:
-   static constexpr const char* ICON_SAVE = ICON_FK_FLOPPY_O;
+   static constexpr const char* ICON_SAVE = ICON_LC_SAVE;
 
    bool IsStartup() const { return m_table->m_liveBaseTable && m_showStartup; }
    template <class T> T* GetStartupObj(T* obj) const;
+   void NameField(const std::function<string()>& getName, const std::function<void(const string&)>& setName);
+   // The parts' and the table's shared header row: a picker button (icon + chevron, popup listing the
+   // parts of `siblingParent` group — nullptr: the root level), a name field filling the remaining
+   // width, and a lock toggle; `currentSibling` is the part highlighted in the list (nullptr: none)
+   void HeaderRow(const std::shared_ptr<Sampler>& icon, const char* iconGlyph, PartGroup* siblingParent, IEditable* currentSibling, const std::function<string()>& getName,
+      const std::function<void(const string&)>& setName, bool locked, const std::function<void()>& toggleLock, bool nameDisabled);
 
    // Shared handling of fields that can be synchronized between a live table and its
    // startup version: BeginSyncField resolves the displayed instance and its counterpart
@@ -181,6 +211,12 @@ private:
          ImGui::SetItemTooltip("%s", tooltip);
    }
 
+   // Async image import started from the button trailing image combos: the OS file picker feeds a
+   // shared slot polled once per frame; on completion the file is imported and linked to the field
+   bool CanImportImageField() const;
+   void RequestImageFieldImport(const std::function<void(PropertyPane&, const string&)>& link);
+   void PollImageFieldImport();
+
    int m_modified = 0;
    bool m_editCancelled = false; // A field edit was cancelled with Esc (its value was restored by ImGui)
    int m_modifyFieldId = 1;
@@ -189,6 +225,7 @@ private:
    bool m_showStartup = false;
    PinTable* const m_table;
    vector<IEditable*> m_coEdited; // Other parts of a uniform-type selection, co-edited with the pane's object
+   bool m_lockScope = false; // The pane of a locked part is disabled (open scope, closed by EndEditScope)
    bool m_inSection = false;
    bool m_sectionHasSync = false;
    float m_syncWidth = 0.f;
@@ -238,6 +275,8 @@ template <class T> vector<PropertyPane::CoTarget<T>> PropertyPane::GetCoTargets(
    const bool editedSide = (sync.display == obj);
    for (IEditable* co : m_coEdited)
    {
+      if (co->IsUILocked())
+         continue; // Locked parts are not modified by the co-edited fields
       T* const edited = dynamic_cast<T*>(co);
       if (edited == nullptr)
          continue;
@@ -370,6 +409,48 @@ inline void PropertyPane::InputInt(T* obj, const string& label, const std::funct
    WidgetTooltip(tooltip);
    EndSyncField(sync, targets, getter, setter, value);
    ImGui::PopID();
+}
+
+template <class T>
+inline void PropertyPane::SliderInt(
+   T* obj, const string& label, const int minValue, const int maxValue, const std::function<int(const T*)>& getter, const std::function<void(T*, int)>& setter, const char* tooltip)
+{
+   assert(m_inSection);
+   m_modifyFieldId++;
+   PropertyLabel(label, tooltip);
+   const SyncField<T> sync = BeginSyncField(obj);
+   const vector<CoTarget<T>> targets = GetCoTargets(sync, obj);
+   ImGui::PushID(label.c_str());
+   int value = getter(sync.display);
+   ImGui::PushItemFlag(ImGuiItemFlags_MixedValue, IsMixed(getter, sync.display, targets));
+   if (ImGui::SliderInt(("##" + label).c_str(), &value, minValue, maxValue))
+   {
+      setter(sync.display, value);
+      for (const CoTarget<T>& target : targets)
+         setter(target.display, value);
+      m_modified = m_modifyFieldId;
+   }
+   ImGui::PopItemFlag();
+   WidgetTooltip(tooltip);
+   EndSyncField(sync, targets, getter, setter, value);
+   ImGui::PopID();
+}
+
+template <class T> inline void PropertyPane::Button(T* obj, const string& label, const std::function<void(T*)>& action, const char* tooltip)
+{
+   assert(m_inSection);
+   m_modifyFieldId++;
+   PropertyLabel(""s, nullptr);
+   const SyncField<T> sync = BeginSyncField(obj);
+   const vector<CoTarget<T>> targets = GetCoTargets(sync, obj);
+   if (ImGui::Button(label.c_str(), ImVec2(ImGui::CalcItemWidth(), 0.f)))
+   {
+      action(sync.display);
+      for (const CoTarget<T>& target : targets)
+         action(target.display);
+      m_modified = m_modifyFieldId;
+   }
+   WidgetTooltip(tooltip);
 }
 
 template <class T>
@@ -571,8 +652,8 @@ inline void PropertyPane::InputResURI(T* obj, const string& label, const std::fu
 }
 
 template <class T>
-inline void PropertyPane::Combo(
-   T* obj, const string& label, const std::vector<string>& values, const std::function<int(const T*)>& getter, const std::function<void(T*, int)>& setter, const char* tooltip)
+inline void PropertyPane::Combo(T* obj, const string& label, const std::vector<string>& values, const std::function<int(const T*)>& getter, const std::function<void(T*, int)>& setter,
+   const char* tooltip, const std::function<void(const SyncField<T>&, const vector<CoTarget<T>>&)>& trailing)
 {
    assert(m_inSection);
    m_modifyFieldId++;
@@ -583,6 +664,8 @@ inline void PropertyPane::Combo(
    int value = getter(sync.display);
    const int displayIndex = values.empty() ? -1 : clamp(value, 0, static_cast<int>(values.size()) - 1);
    const bool mixed = IsMixed(getter, sync.display, targets);
+   if (trailing) // Leave room for the trailing widget inside the field column
+      ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - 2.f * m_syncWidth - ImGui::GetFrameHeight() - ImGui::GetStyle().ItemInnerSpacing.x);
    if (ImGui::BeginCombo(("##" + label).c_str(), mixed ? "-" : (displayIndex < 0 ? "" : values[displayIndex].c_str())))
    {
       for (size_t i = 0; i < values.size(); i++)
@@ -599,6 +682,11 @@ inline void PropertyPane::Combo(
       ImGui::EndCombo();
    }
    WidgetTooltip(tooltip);
+   if (trailing)
+   {
+      ImGui::SameLine(0.f, ImGui::GetStyle().ItemInnerSpacing.x);
+      trailing(sync, targets);
+   }
    EndSyncField(sync, targets, getter, setter, value);
    ImGui::PopID();
 }
@@ -611,7 +699,29 @@ inline void PropertyPane::ImageCombo(T* obj, const string& label, const std::fun
    std::ranges::transform(m_table->m_vimage.begin(), m_table->m_vimage.end(), images.begin(), map);
    std::sort(images.begin(), images.end(), StrLessNoCase);
    images.insert(images.begin(), ""s);
-   Combo<T>(obj, label, images, [&](const T* obj) { return max(0, FindIndexOf(images, getter(obj))); }, [&](T* obj, int v) { setter(obj, images[v]); }, tooltip);
+   Combo<T>(
+      obj, label, images, [&](const T* obj) { return max(0, FindIndexOf(images, getter(obj))); }, [&](T* obj, int v) { setter(obj, images[v]); }, tooltip,
+      [this, setter](const SyncField<T>& sync, const vector<CoTarget<T>>& targets)
+      {
+         // Importing an image modifies the table: only possible when the table can be edited (not locked, not in a tweak session)
+         const bool canEdit = m_table->m_liveBaseTable == nullptr && !m_table->IsLocked();
+         const bool canImport = canEdit && CanImportImageField();
+         ImGui::BeginDisabled(!canImport);
+         if (SquareIconButtonInk(ICON_LC_FOLDER_OPEN, "##ImportImage"))
+            RequestImageFieldImport(
+               [display = sync.display, targets, setter, fieldId = m_modifyFieldId](PropertyPane& pane, const string& imageName)
+               {
+                  setter(display, imageName);
+                  for (const CoTarget<T>& target : targets)
+                     setter(target.display, imageName);
+                  pane.m_modified = fieldId;
+               });
+         ImGui::EndDisabled();
+         ImGui::SetItemTooltip("%s",
+            canEdit                                  ? "Import an image and link it to this field"
+               : m_table->m_liveBaseTable != nullptr ? "Import an image and link it to this field\nNot available in a tweak session"
+                                                     : "Import an image and link it to this field\nThe table is locked");
+      });
 }
 
 template <class T>
