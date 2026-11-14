@@ -121,9 +121,10 @@ jobs:
             ${{ runner.os }}-${{ env.CONFIG }}-build-
       - name: Build (MSVC, BGFX, x64)
         run: |
-          # /MP: compile the translation units of a project in parallel, on top of the project level
-          # parallelism cmake --build --parallel already gives
-          cmake -DRENDERER=BGFX -DPLATFORM=windows -DARCH=x64 -DCMAKE_CXX_FLAGS="/MP" -G "Visual Studio 18 2026" -A x64 -B build
+          # -MP: compile the translation units of a project in parallel, on top of the project level
+          # parallelism cmake --build --parallel already gives. Dashed, not /MP: the bash shell would
+          # MSYS-convert a leading slash flag into a path (C:/Program Files/Git/MP) and poison cl
+          cmake -DRENDERER=BGFX -DPLATFORM=windows -DARCH=x64 -DCMAKE_CXX_FLAGS=-MP -DCMAKE_C_FLAGS=-MP -G "Visual Studio 18 2026" -A x64 -B build
           cmake --build build --config "$CONFIG" --parallel
       - name: Save the build tree cache
         # Saved also when the build failed: the objects of the files which did compile are the
