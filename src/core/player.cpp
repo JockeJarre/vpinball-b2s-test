@@ -216,6 +216,17 @@ Player::Player(PinTable *const table, const PlayMode playMode, LoadProgress &loa
       if (m_ptable->GetSettings().GetBool(enableId))
       {
          plugin->Load(&m_pluginManager.GetMsgAPI());
+         // Announce to the plugin the extended API features this host build implements (see VPXPI_MSG_HOST_FEATURES):
+         // a plugin built against extended plugin headers must know whether the host shares its layout of the shared
+         // structs before it reads or writes the fields added at their end, so that it never touches memory the host
+         // did not allocate for it. Sent right after Load, when the plugin has registered its message handlers
+         {
+            const MsgPluginAPI& msgApi = m_pluginManager.GetMsgAPI();
+            const unsigned int featuresMsgId = msgApi.GetMsgID(VPXPI_NAMESPACE, VPXPI_MSG_HOST_FEATURES);
+            const VPXHostFeaturesMsg featuresMsg { VPXPLUGIN_HOSTFEATURE_ANCILLARY_LAYERING };
+            msgApi.SendMsg(m_pluginAPI.GetVPXEndPointId(), featuresMsgId, plugin->m_endpointId, &featuresMsg);
+            msgApi.ReleaseMsgID(featuresMsgId);
+         }
       }
       else
       {

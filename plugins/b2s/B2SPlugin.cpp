@@ -320,6 +320,7 @@ MSGPI_EXPORT void MSGPIAPI B2SProPluginUnload()
    msgApi->ReleaseMsgID(getVpxApiId);
    msgApi->ReleaseMsgID(getScriptApiId);
    msgApi->ReleaseMsgID(getPagedUIApiId);
+   B2SRenderer::UnregisterSettings(msgApi);
    vpxApi = nullptr;
    pagedUIApi = nullptr;
    msgApi = nullptr;

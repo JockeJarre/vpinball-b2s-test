@@ -34,6 +34,12 @@ class B2SServer;
 // table load (restarting the table is enough for a change to be honored)
 bool ShineThrough();
 
+// Whether the running host announced (VPXPI_MSG_HOST_FEATURES) that it composites the ancillary window renderers
+// and shares our layout of the extended structs: the only case where reading VPXRenderContext2D::isLayered and
+// writing AncillaryRendererDef::isLayeredOverlay into the host allocated arrays are safe. Off on hosts built
+// without these fields (the official builds), where the plugin keeps to the official layout end to end
+bool HostSupportsAncillaryLayering();
+
 class B2SRenderer final
 {
 public:
@@ -41,6 +47,9 @@ public:
    ~B2SRenderer();
 
    static void RegisterSettings(const MsgPluginAPI* const msgApi, unsigned int endpointId);
+   // Releases the plugin level message ids taken by RegisterSettings (to call from the plugin unload, the
+   // MsgPluginManager asserts about leaked message ids and subscriptions when the plugin is unloaded)
+   static void UnregisterSettings(const MsgPluginAPI* const msgApi);
    // Fills the renderer owned entries (ShowGrill, DualMode, UpgradedSegmentRendering, KeepAspectRatio) of the plugin
    // declared "settings" sheet, returns the number of items filled
    static int FillSettingsItems(PagedUIItemDef* items);

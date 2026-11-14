@@ -42,6 +42,7 @@
 // Ancillary window rendering
 #define VPXPI_MSG_GET_AUX_RENDERER      "GetAuxRenderer:1"      // Broadcasted with a GetAncillaryRendererMsg to discover ancillary window renderer implemented in plugins
 #define VPXPI_EVT_AUX_RENDERER_CHG      "AuxRendererChanged:1"  // Broadcasted when an ancillary renderer is added or removed
+#define VPXPI_MSG_HOST_FEATURES         "HostFeatures:1"        // Sent by the host to each plugin right after it is loaded, with a VPXHostFeaturesMsg: the extended API features this host build implements
 
 typedef void* VPXTexture;
 
@@ -141,8 +142,10 @@ typedef struct VPXRenderContext2D
    // is drawn, from the least to the most prioritized one, so the areas one renderer leaves untouched show the
    // renderers below it. Zero, the renderer shown is the only one drawn, and the areas it leaves untouched show the
    // window clear: a renderer which draws with alpha is then expected to cover the whole window (see
-   // AncillaryRendererDef::isLayeredOverlay). The field is written at every ancillary render call, and is zero for a
-   // host which does not know it (an embedded 3D render is never composited)
+   // AncillaryRendererDef::isLayeredOverlay). An embedded 3D render is never composited. NOTE: this field is this
+   // struct's last one, added after the plugins were built: reading it from a context handed over by a host which
+   // does not know it reads past that host's struct (whatever memory sits next to it: no layout, no zero). Only
+   // read it once the host announced VPXPLUGIN_HOSTFEATURE_ANCILLARY_LAYERING (VPXPI_MSG_HOST_FEATURES)
    int isLayered;
 } VPXRenderContext2D;
 
@@ -156,9 +159,23 @@ typedef struct AncillaryRendererDef
    // Set to a non zero value by a renderer which draws with alpha and leaves the areas it does not cover
    // untouched: the host then composites the less prioritized renderers of the same window below it, so they
    // shine through the areas this one leaves. Zero (the default, also for plugins built before this field
-   // existed) means the renderer covers the whole window and is therefore the only one drawn.
+   // existed) means the renderer covers the whole window and is therefore the only one drawn. NOTE: this field
+   // is this struct's last one, added after the plugins were built, and the entries array of
+   // GetAncillaryRendererMsg is allocated by the host with its own layout of the struct: writing this field
+   // into a host allocated array of a smaller (official) layout writes past the host's element. Only write it
+   // once the host announced VPXPLUGIN_HOSTFEATURE_ANCILLARY_LAYERING (VPXPI_MSG_HOST_FEATURES)
    int isLayeredOverlay;
 } AncillaryRendererDef;
+
+typedef struct VPXHostFeaturesMsg
+{
+   unsigned int features; // Bitwise OR of the VPXPLUGIN_HOSTFEATURE_* bits below
+} VPXHostFeaturesMsg;
+
+#define VPXPLUGIN_HOSTFEATURE_ANCILLARY_LAYERING (1u << 0) // The host composites the ancillary window renderers: it reads
+                                                           // AncillaryRendererDef::isLayeredOverlay in the arrays it collects,
+                                                           // writes VPXRenderContext2D::isLayered at every ancillary render
+                                                           // call, and its layout of these structs is the one above
 
 typedef struct GetAncillaryRendererMsg
 {

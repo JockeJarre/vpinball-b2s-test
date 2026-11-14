@@ -727,9 +727,19 @@ void B2SServer::OnGetRenderer(const unsigned int, void* userData, void* msgData)
          // leave untouched areas for them to shine through. The setting setter announces a renderer list
          // refresh (see the hand rolled setting in B2SRenderer.cpp), so what is declared here is in step with
          // what is really drawn
-         AncillaryRendererDef rendererDef = me->m_ancillaryRendererDef;
-         rendererDef.isLayeredOverlay = ShineThrough() ? 1 : 0;
-         msg->entries[msg->count] = rendererDef;
+         const AncillaryRendererDef& def = me->m_ancillaryRendererDef;
+         AncillaryRendererDef& entry = msg->entries[msg->count];
+         // Filled field by field up to the official layout: the entries array is allocated by the host, whose
+         // AncillaryRendererDef is its own (an official host has no isLayeredOverlay, its elements are smaller
+         // than ours), and copying the whole struct would write past the host's element. The extended field is
+         // only handed to a host that announced it shares our layout (VPXPI_MSG_HOST_FEATURES, B2SRenderer.cpp)
+         entry.id = def.id;
+         entry.name = def.name;
+         entry.description = def.description;
+         entry.context = def.context;
+         entry.Render = def.Render;
+         if (HostSupportsAncillaryLayering())
+            entry.isLayeredOverlay = ShineThrough() ? 1 : 0;
       }
       msg->count++;
    }

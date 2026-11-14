@@ -38,6 +38,15 @@ MSGPI_BOOL_VAL_SETTING(centerVerticallyProp, "CenterVertically", "Center vertica
 static const MsgPluginAPI* s_msgApi = nullptr;
 static unsigned int s_endpointId = 0;
 static unsigned int s_auxRendererChgId = 0;
+// What the running host announced about its extended API (VPXPI_MSG_HOST_FEATURES, 0 = it announced nothing,
+// as the official builds do: they do not know the message). The plugin is built against extended plugin headers
+// (isLayered, isLayeredOverlay): fields added at the end of structs the other side allocates are only safe to
+// touch on a host that declared the matching feature, an official host reads and writes with its own, smaller
+// layouts and never tells us about fields it does not have
+static unsigned int s_hostFeatures = 0;
+static unsigned int s_hostFeaturesMsgId = 0;
+static void OnHostFeatures(const unsigned int, void*, void* msgData) { s_hostFeatures = static_cast<const VPXHostFeaturesMsg*>(msgData)->features; }
+bool HostSupportsAncillaryLayering() { return (s_hostFeatures & VPXPLUGIN_HOSTFEATURE_ANCILLARY_LAYERING) != 0; }
 static int shineThroughProp_Val = 0;
 static int shineThroughProp_Get() { return shineThroughProp_Val; }
 static void shineThroughProp_Set(int v)
@@ -64,8 +73,10 @@ bool ShineThrough() { return shineThroughProp_Get() != 0; }
 // so that the renderers below it are drawn as well. Not composited (the host layering master switch off, no other
 // renderer claiming the window), the areas we would leave open show the window clear: the whole window is then
 // painted, as it always was. The declaration (ShineThrough) and the drawing (this) can therefore differ, and must:
-// we declare the capability, the host decides whether it is used, and we draw for what it decided
-bool TransparencyActive(VPXRenderContext2D* ctx) { return ctx != nullptr && ctx->isLayered != 0 && shineThroughProp_Get() != 0; }
+// we declare the capability, the host decides whether it is used, and we draw for what it decided. The host
+// feature check comes first and short circuits: a host which announced nothing hands over contexts built with
+// its own, smaller layout, and reading isLayered from one would read past its struct (see VPXPlugin.h)
+bool TransparencyActive(VPXRenderContext2D* ctx) { return HostSupportsAncillaryLayering() && ctx != nullptr && ctx->isLayered != 0 && shineThroughProp_Get() != 0; }
 
 static const char* dualModeValues[] = { "Authentic", "Fantasy" };
 MSGPI_ENUM_VAL_SETTING(dualModeProp, "DualMode", "Dual Mode", "Active mode for dual backglasses (authentic or fantasy)", true, 1, 2, dualModeValues, 1);
@@ -219,12 +230,27 @@ void B2SRenderer::RegisterSettings(const MsgPluginAPI* const msgApi, unsigned in
    s_msgApi = msgApi;
    s_endpointId = endpointId;
    s_auxRendererChgId = msgApi->GetMsgID(VPXPI_NAMESPACE, VPXPI_EVT_AUX_RENDERER_CHG);
+   // Listen for the host features announcement (see above): the host sends it right after loading the plugin,
+   // an official host built without the message never sends it and the feature stays off
+   s_hostFeaturesMsgId = msgApi->GetMsgID(VPXPI_NAMESPACE, VPXPI_MSG_HOST_FEATURES);
+   msgApi->SubscribeMsg(endpointId, s_hostFeaturesMsgId, &OnHostFeatures, nullptr);
    msgApi->RegisterSetting(endpointId, &showGrillProp);
    msgApi->RegisterSetting(endpointId, &dualModeProp);
    msgApi->RegisterSetting(endpointId, &upgradedSegRenderingProp);
    msgApi->RegisterSetting(endpointId, &keepAspectRatioProp);
    msgApi->RegisterSetting(endpointId, &centerVerticallyProp);
    msgApi->RegisterSetting(endpointId, &shineThroughProp);
+}
+
+void B2SRenderer::UnregisterSettings(const MsgPluginAPI* const msgApi)
+{
+   msgApi->UnsubscribeMsg(s_hostFeaturesMsgId, &OnHostFeatures, nullptr);
+   msgApi->ReleaseMsgID(s_hostFeaturesMsgId);
+   msgApi->ReleaseMsgID(s_auxRendererChgId);
+   s_hostFeaturesMsgId = 0;
+   s_auxRendererChgId = 0;
+   s_hostFeatures = 0;
+   s_msgApi = nullptr;
 }
 
 namespace
