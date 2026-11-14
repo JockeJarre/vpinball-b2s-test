@@ -10,8 +10,11 @@
 #include "../vpx-test.h"
 #include "physics-harness.h"
 
+#include "math/dragpoint.h"
+#include "parts/ball.h"
 #include "parts/flipper.h"
 #include "parts/pintable.h"
+#include "parts/ramp.h"
 #include "physics/PhysicsEngine.h"
 #include "physics/collide.h"
 #include "physics/collideex.h"
@@ -254,5 +257,217 @@ TEST_CASE("PhysicsProfile: flipper inertia model and mass round-trip")
       CHECK(std::isfinite(mover.m_inertia));
       CHECK(mover.GetMass() == doctest::Approx(2.f * partMass));
       CHECK(mover.m_inertia == doctest::Approx(2.f * partMass * (running == PhysicProfile::V10_9 ? mover.m_inertiaShape : rod)));
+   }
+}
+
+// ---------------------------------------------------------------------------
+// Ramp side walls (https://github.com/vpinball/vpinball/issues/222): V10_8 walls are LineSeg rectangles subdivided
+// along the slope, and the segments walking the slope from high to low got their subdivided height windows
+// swapped, so the collider keeping the ball on the ramp is dead wherever the floor height falls outside the
+// swapped window: the ball escapes through the wall on steep sections, while balls rolling on the playfield
+// below the raised wall are phantom-blocked. V10_9 builds the exact sloped quads.
+// ---------------------------------------------------------------------------
+
+TEST_CASE("PhysicsProfile: ramp side wall blocks the ball along the whole slope")
+{
+   for (const PhysicProfile profile : kProfiles)
+   {
+      CAPTURE(ProfileName(profile));
+      PhysicsTestHarness harness;
+
+      // The issue's repro: a straight 2-point ramp, heights 0 -> 105, widths 115 -> 65, wall heights 60
+      Ramp *const ramp = Ramp::COMCreate();
+      ramp->Init(500.f, 1000.f, false);
+      ramp->SetName("TestRamp");
+      ramp->m_curve.ClearPoints();
+      ramp->m_curve.PushPoint(std::make_unique<DragPoint>(&ramp->m_curve, 500.f, 1400.f, 0.f, true));
+      ramp->m_curve.PushPoint(std::make_unique<DragPoint>(&ramp->m_curve, 500.f, 600.f, 0.f, true));
+      ramp->m_d.m_type = RampTypeFlat;
+      ramp->m_d.m_heightbottom = 0.f;
+      ramp->m_d.m_heighttop = 105.f;
+      ramp->m_d.m_widthbottom = 115.f;
+      ramp->m_d.m_widthtop = 65.f;
+      ramp->m_d.m_leftwallheight = 60.f;
+      ramp->m_d.m_rightwallheight = 60.f;
+      ramp->m_d.m_collidable = true;
+      ramp->m_d.m_overwritePhysics = true;
+      ramp->m_d.m_elasticity = 0.3f;
+      ramp->m_d.m_friction = 0.3f;
+      ramp->m_d.m_scatter = 0.f;
+      harness.GetTable()->AddPart(ramp);
+      ramp->Release(); // owned by the table
+
+      const PhysicProfile running = StartWithProfile(harness, profile);
+
+      // x of the right outline at height y (the wall line): the outline is a trapezoid, the edge
+      // widens to 557.5 at the bottom, so "outside" must be tested against the edge at the ball's y
+      const auto rightEdge = [](const float y)
+      {
+         const float t = (1400.f - y) / 800.f;
+         return 500.f + 0.5f * (115.f - 50.f * (t < 0.f ? 0.f : (t > 1.f ? 1.f : t)));
+      };
+
+      // t ~= 0.9 of the ramp: floor height ~94.5, right outline x = 535 — inside the deepest V10_8 dead zone
+      SUBCASE("a ball on the ramp cannot escape through the wall")
+      {
+         Ball *const ball = harness.AddBall(520.f, 680.f, 94.5f, 300.f, 0.f, 0.f);
+         // "escaped" = outside the outline above playfield height (a ball that fell to the playfield and rolls under the wall is not an escape)
+         const auto escaped = [&ball, &rightEdge]()
+         {
+            const Vertex3Ds &p = ball->m_hitBall.m_d.m_pos;
+            return p.x > rightEdge(p.y) && p.z > 60.f;
+         };
+         CAPTURE(ball->m_hitBall.m_d.m_pos);
+         if (running == PhysicProfile::V10_9)
+            CHECK(!harness.AdvanceUntil(escaped, 2000));
+         else
+            CHECK(harness.AdvanceUntil(escaped, 2000)); // the dead zone lets it leave through the wall
+      }
+
+      SUBCASE("a ball on the playfield rolls under the raised wall")
+      {
+         Ball *const ball = harness.AddBall(520.f, 680.f, 0.f, 300.f, 0.f, 0.f);
+         const auto passed = [&ball, &rightEdge]()
+         {
+            const Vertex3Ds &p = ball->m_hitBall.m_d.m_pos;
+            return p.x > rightEdge(p.y);
+         };
+         CAPTURE(ball->m_hitBall.m_d.m_pos);
+         if (running == PhysicProfile::V10_9)
+            CHECK(harness.AdvanceUntil(passed, 2000)); // the wall's bottom edge follows the ramp, the ball passes under
+         else
+            CHECK(!harness.AdvanceUntil(passed, 2000)); // the swapped height window phantom-blocks it at the wall line
+      }
+   }
+}
+
+// ---------------------------------------------------------------------------
+// The cabinet nudge pseudo-force is part of the ball's external acceleration
+// (PhysicsEngine::GetFrameAcceleration), feeding the contact model under all
+// profiles (nudge-only: it is zero without an active nudge, see physconst.h).
+// It is an acceleration, so V10_8's 1/mass scaling quirk stays limited to gravity.
+// ---------------------------------------------------------------------------
+
+TEST_CASE("PhysicsProfile: the ball acceleration includes the nudge pseudo-force")
+{
+   for (const PhysicProfile profile : kProfiles)
+   {
+      CAPTURE(ProfileName(profile));
+      PhysicsTestHarness harness;
+      harness.GetTable()->m_angletiltMin = harness.GetTable()->m_angletiltMax = 0.f; // flat projection
+      const PhysicProfile running = StartWithProfile(harness, profile); // flat gravity (0, 0, -G)
+      harness.GetEngine()->SetCabinetAcceleration(Vertex2D(2.f, 0.f)); // pushes the balls toward -x
+
+      HitBall ball;
+      ball.SetPhysics(harness.GetEngine());
+      ball.m_d.m_mass = 2.f;
+      ball.m_angularmomentum.SetZero(); // no centripetal term
+
+      const float f = MS2TOVPUVPT2(2.f); // pseudo-acceleration magnitude
+      const Vertex3Ds acc = ball.SurfaceAcceleration(Vertex3Ds(0.f, 0.f, -DEFAULT_BALL_SIZE));
+      const float gravityScale = running == PhysicProfile::V10_8 ? 0.5f : 1.f; // the 1/mass quirk only applies to gravity
+      CHECK(acc.x == doctest::Approx(-f));
+      CHECK(fabsf(acc.y) < 1e-6f);
+      CHECK(acc.z == doctest::Approx(-GRAVITYCONST * gravityScale));
+   }
+}
+
+TEST_CASE("PhysicsProfile: a contact anticipates the nudge pressing the ball into it")
+{
+   for (const PhysicProfile profile : kProfiles)
+   {
+      CAPTURE(ProfileName(profile));
+      PhysicsTestHarness harness;
+      const PhysicProfile running = StartWithProfile(harness, profile); // flat gravity
+      harness.GetEngine()->SetCabinetAcceleration(Vertex2D(2.f, 0.f)); // pushes the ball toward -x
+
+      HitBall ball;
+      ball.SetPhysics(harness.GetEngine());
+      ball.m_d.m_vel.SetZero();
+      ball.m_angularmomentum.SetZero();
+
+      // Support on the ball's -x side: the contact must anticipate the next step's
+      // pseudo-force injection the same way it anticipates gravity.
+      CollisionEvent coll;
+      coll.m_hitnormal = Vertex3Ds(1.f, 0.f, 0.f);
+      coll.m_hitdistance = 1.f; // outside PHYS_TOUCH: no embed correction
+      coll.m_hit_org_normalvelocity = 0.f;
+
+      ball.HandleStaticContact(coll, 0.3f, (float)PHYS_FACTOR);
+      CHECK(ball.m_d.m_vel.x == doctest::Approx(MS2TOVPUVPT2(2.f) * PHYS_FACTOR));
+
+      // Without a nudge, the same contact applies no impulse
+      harness.GetEngine()->SetCabinetAcceleration(Vertex2D(0.f, 0.f));
+      HitBall idle;
+      idle.SetPhysics(harness.GetEngine());
+      idle.m_d.m_vel.SetZero();
+      idle.m_angularmomentum.SetZero();
+      idle.HandleStaticContact(coll, 0.3f, (float)PHYS_FACTOR);
+      CHECK(fabsf(idle.m_d.m_vel.x) < 1e-6f);
+   }
+}
+
+TEST_CASE("PhysicsProfile: the flipper contact sees the nudge pressing the ball into it")
+{
+   for (const PhysicProfile profile : kProfiles)
+   {
+      CAPTURE(ProfileName(profile));
+      PhysicsTestHarness harness;
+      const PhysicProfile running = StartWithProfile(harness, profile); // flat gravity
+      harness.GetEngine()->SetCabinetAcceleration(Vertex2D(2.f, 0.f)); // pushes the ball toward -x
+
+      Flipper *const flipperPart = Flipper::COMCreate();
+      flipperPart->Init(0.f, 0.f, false);
+      flipperPart->SetName("TestFlipperNudge");
+      harness.GetTable()->AddPart(flipperPart);
+      flipperPart->Release(); // owned by the table
+
+      // Flipper at angle 0 pointing toward -y: face2 on the +x side (same layout as the flipper face tests)
+      HitFlipper flipper(Vertex2D(500.f, 500.f), 30.f, 15.f, 80.f, 0.f, 0.f, 0.f, 100.f, flipperPart, running);
+      flipper.SetPhysics(harness.GetEngine());
+      const Vertex2D F(flipper.m_flipperMover.m_zeroAngNorm);
+      const Vertex2D T(F.y, -F.x);
+      const Vertex2D facePoint = Vertex2D(500.f, 500.f) + F * 30.f + T * (80.f * F.x * 0.5f);
+
+      HitBall ball;
+      ball.SetPhysics(harness.GetEngine());
+      ball.m_d.m_pos = Vertex3Ds(facePoint.x + F.x * DEFAULT_BALL_SIZE, facePoint.y + F.y * DEFAULT_BALL_SIZE, DEFAULT_BALL_SIZE);
+      ball.m_d.m_vel.SetZero();
+      ball.m_angularmomentum.SetZero();
+
+      // The nudge presses the ball into the face: the gap-closing criterion must see
+      // it, so the contact applies an impulse instead of early-outing (normAcc = 0
+      // without the frame term: gravity is tangential to the vertical face).
+      CollisionEvent coll;
+      coll.m_ball = &ball;
+      coll.m_hitnormal = Vertex3Ds(F.x, F.y, 0.f);
+      coll.m_hitdistance = 0.f;
+      coll.m_hit_org_normalvelocity = 0.f;
+
+      flipper.Contact(coll, (float)PHYS_FACTOR);
+      CHECK(ball.m_d.m_vel.Dot(coll.m_hitnormal) > 0.f);
+   }
+}
+
+TEST_CASE("PhysicsProfile: a ball nudged into a wall keeps contact")
+{
+   for (const PhysicProfile profile : kProfiles)
+   {
+      CAPTURE(ProfileName(profile));
+      PhysicsTestHarness harness;
+      harness.GetTable()->m_physicProfile = profile;
+      harness.AddWallSegment(100.f, 900.f, 100.f, 1100.f); // wall at x ~100, normal +-x
+      Ball *const ball = harness.AddBall(101.f + DEFAULT_BALL_SIZE, 1000.f, 0.f); // resting against its +x face
+      StartWithProfile(harness, profile); // flat gravity
+
+      harness.AdvanceMs(500); // settle into the contact
+
+      harness.GetEngine()->SetCabinetAcceleration(Vertex2D(3.f, 0.f)); // presses the ball into the wall
+      harness.AdvanceMs(1000);
+
+      const BallS &d = ball->m_hitBall.m_d;
+      CHECK(d.m_pos.x > 101.f + DEFAULT_BALL_SIZE - 1.f); // did not sink into the wall
+      CHECK(d.m_pos.x < 101.f + DEFAULT_BALL_SIZE + 5.f); // stays pressed against it
+      CHECK(d.m_vel.Length() < 2.f); // no runaway velocity
    }
 }

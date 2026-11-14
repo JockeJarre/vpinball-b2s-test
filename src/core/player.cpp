@@ -738,7 +738,9 @@ void Player::InitTableSession(const bool isInitial)
             if (used.contains(image))
                preloadImages.push_back(image);
          if (preloadImages.size() < m_ptable->m_vimage.size())
+	 {
             PLOGI << (m_ptable->m_vimage.size() - preloadImages.size()) << " of " << m_ptable->m_vimage.size() << " images are not preloaded as no part shown in play uses them";
+	 }
       }
 
       std::mutex mutex;

@@ -270,20 +270,32 @@ void PhysicsEngine::CollectColliders(IEditable *editable, vector<HitObject *> *h
 void PhysicsEngine::AddCabinetBoundingHitShapes(PinTable *const table)
 {
    // TODO these are the only colliders that are added without an associated editable. We could enforce one here to guarantee m_editable != nullptr and simplify the code
-   
-   // simple outer borders:
-   AddCollider(new LineSeg(table, Vertex2D(table->m_right, table->m_top), Vertex2D(table->m_right, table->m_bottom), 0.f, table->m_glassTopHeight), false);
-   AddCollider(new LineSeg(table, Vertex2D(table->m_left, table->m_bottom), Vertex2D(table->m_left, table->m_top), 0.f, table->m_glassBottomHeight), false);
+
+   // simple outer borders: the side walls must follow the (possibly sloped) glass, so each is a
+   // rectangular segment up to the lowest glass height, completed by a triangle wedge sealing the
+   // gap up to the glass on its high end when the glass is sloped
+   const float lowGlass = min(table->m_glassTopHeight, table->m_glassBottomHeight);
+   AddCollider(new LineSeg(table, Vertex2D(table->m_right, table->m_top), Vertex2D(table->m_right, table->m_bottom), 0.f, lowGlass), false);
+   AddCollider(new LineSeg(table, Vertex2D(table->m_left, table->m_bottom), Vertex2D(table->m_left, table->m_top), 0.f, lowGlass), false);
    AddCollider(new LineSeg(table, Vertex2D(table->m_right, table->m_bottom), Vertex2D(table->m_left, table->m_bottom), 0.f, table->m_glassBottomHeight),  false);
    AddCollider(new LineSeg(table, Vertex2D(table->m_left, table->m_top), Vertex2D(table->m_right, table->m_top), 0.f, table->m_glassTopHeight), false);
-
-   // glass:
-   Vertex3Ds * const rgv3D = new Vertex3Ds[4];
-   rgv3D[0] = Vertex3Ds(table->m_left, table->m_top, table->m_glassTopHeight);
-   rgv3D[1] = Vertex3Ds(table->m_right, table->m_top, table->m_glassTopHeight);
-   rgv3D[2] = Vertex3Ds(table->m_right, table->m_bottom, table->m_glassBottomHeight);
-   rgv3D[3] = Vertex3Ds(table->m_left, table->m_bottom, table->m_glassBottomHeight);
-   AddCollider(new Hit3DPoly(table, rgv3D, 4), false);
+   if (table->m_glassTopHeight != table->m_glassBottomHeight)
+   {
+      const float hiEndY = (table->m_glassTopHeight > table->m_glassBottomHeight) ? table->m_top : table->m_bottom;
+      const float hiGlass = max(table->m_glassTopHeight, table->m_glassBottomHeight);
+      for (const float x : { table->m_left, table->m_right })
+      {
+         const Vertex3Ds lowTop(x, table->m_top, lowGlass), lowBottom(x, table->m_bottom, lowGlass), high(x, hiEndY, hiGlass);
+         Vertex3Ds rgv3D[3] = { lowTop, lowBottom, high };
+         if (x == table->m_left)
+            std::swap(rgv3D[1], rgv3D[2]); // HitTriangle is single-sided: face the playfield like the segments do
+         HitTriangle *const wedge = new HitTriangle(table, rgv3D, m_physicProfile);
+         if (wedge->IsDegenerate())
+            delete wedge;
+         else
+            AddCollider(wedge, false);
+      }
+   }
 
    /*
    // playfield:
@@ -311,7 +323,8 @@ void PhysicsEngine::AddCabinetBoundingHitShapes(PinTable *const table)
    // glass:
    Vertex3Ds glassNormal(0, table->m_bottom - table->m_top, table->m_glassBottomHeight - table->m_glassTopHeight);
    glassNormal.Normalize();
-   m_hitTopGlass = HitPlane(table, Vertex3Ds(0, glassNormal.z, -glassNormal.y), -table->m_glassTopHeight);
+   const Vertex3Ds glassN(0, glassNormal.z, -glassNormal.y);
+   m_hitTopGlass = HitPlane(table, glassN, glassN.Dot(Vertex3Ds(0, table->m_top, table->m_glassTopHeight)));
    m_hitTopGlass.SetPhysics(this); // copy assignment above does not preserve it
    m_hitTopGlass.m_elasticity = 0.2f;
 }
@@ -936,7 +949,14 @@ void PhysicsEngine::OnBallWallHit(const HitBall& ball, const Vertex3Ds& hitNorma
       plunger->OnBallWallHit(ball, hitNormal, impactSpeed);
 }
 
-Vertex2D PhysicsEngine::GetCabinetAcceleration() const { return g_pplayer ? g_pplayer->m_pininput.m_nudgeHandler->GetCabinetAcceleration() : Vertex2D(0.f, 0.f); }
+Vertex2D PhysicsEngine::GetCabinetAcceleration() const { return g_pplayer ? g_pplayer->m_pininput.m_nudgeHandler->GetCabinetAcceleration() : m_cabinetAcceleration; }
+
+Vertex3Ds PhysicsEngine::GetFrameAcceleration() const
+{
+   const float slope = ANGTORAD(m_table->GetPlayfieldSlope()); // nudge acceleration is in the horizontal cabinet plane, reference frame is the playfield
+   const Vertex2D a = GetCabinetAcceleration();
+   return Vertex3Ds(-MS2TOVPUVPT2(a.x), -MS2TOVPUVPT2(a.y) * cosf(slope), -MS2TOVPUVPT2(a.y) * sinf(slope));
+}
 
 BallControl *PhysicsEngine::GetBallControl() const { return (g_pplayer && g_pplayer->m_liveUI) ? &g_pplayer->m_liveUI->m_ballControl : nullptr; }
 
