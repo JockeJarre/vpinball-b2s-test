@@ -223,7 +223,7 @@ Player::Player(PinTable *const table, const PlayMode playMode, LoadProgress &loa
          {
             const MsgPluginAPI& msgApi = m_pluginManager.GetMsgAPI();
             const unsigned int featuresMsgId = msgApi.GetMsgID(VPXPI_NAMESPACE, VPXPI_MSG_HOST_FEATURES);
-            const VPXHostFeaturesMsg featuresMsg { VPXPLUGIN_HOSTFEATURE_ANCILLARY_LAYERING };
+            VPXHostFeaturesMsg featuresMsg { VPXPLUGIN_HOSTFEATURE_ANCILLARY_LAYERING }; // not const: the SendMsg 'data' parameter is a void*
             msgApi.SendMsg(m_pluginAPI.GetVPXEndPointId(), featuresMsgId, plugin->m_endpointId, &featuresMsg);
             msgApi.ReleaseMsgID(featuresMsgId);
          }
