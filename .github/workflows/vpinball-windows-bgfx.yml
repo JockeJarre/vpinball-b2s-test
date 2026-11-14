@@ -107,10 +107,32 @@ jobs:
           VERSION_MINOR=$(grep -Eo "VP_VERSION_MINOR\s+[0-9]+" src/core/vpversion.h | grep -Eo "[0-9]+")
           VERSION_REV=$(grep -Eo "VP_VERSION_REV\s+[0-9]+" src/core/vpversion.h | grep -Eo "[0-9]+")
           echo "PKG_NAME=VPinballX_BGFX-${VERSION_MAJOR}.${VERSION_MINOR}.${VERSION_REV}-${REVISION}-${SHA_SHORT}-windows-x64-${CONFIG}" >> $GITHUB_ENV
+      - name: Restore the build tree cache
+        # The runners check the repository out at the same path every time, so MSBuild's incremental
+        # state (obj/, tlog/) restores and applies: a push touching a couple of files then rebuilds
+        # those and links, instead of compiling the whole tree. The key is the commit, so each run
+        # saves its own entry, and the restore keys pick the latest one of the branch.
+        id: buildcache
+        uses: actions/cache/restore@v5
+        with:
+          path: build
+          key: ${{ runner.os }}-${{ env.CONFIG }}-build-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-${{ env.CONFIG }}-build-
       - name: Build (MSVC, BGFX, x64)
         run: |
-          cmake -DRENDERER=BGFX -DPLATFORM=windows -DARCH=x64 -G "Visual Studio 18 2026" -A x64 -B build
+          # /MP: compile the translation units of a project in parallel, on top of the project level
+          # parallelism cmake --build --parallel already gives
+          cmake -DRENDERER=BGFX -DPLATFORM=windows -DARCH=x64 -DCMAKE_CXX_FLAGS="/MP" -G "Visual Studio 18 2026" -A x64 -B build
           cmake --build build --config "$CONFIG" --parallel
+      - name: Save the build tree cache
+        # Saved also when the build failed: the objects of the files which did compile are the
+        # progress, the next run of the branch starts from there
+        if: steps.buildcache.outputs.cache-hit != 'true' && !cancelled()
+        uses: actions/cache/save@v5
+        with:
+          path: build
+          key: ${{ runner.os }}-${{ env.CONFIG }}-build-${{ github.sha }}
       - name: Stage the application
         # The plugin is a shared module, MSVC is a multi-config generator: everything of a
         # configuration sits under build/<config>
