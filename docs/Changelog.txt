@@ -289,10 +289,24 @@ FEATURES:
 FIXES:
 
 - B2S Pro plugin: fix the renderer declaration handed to a host built with a smaller AncillaryRendererDef (an
-  official build, which has no layered overlay field): the host's entries array is indexed as bytes with the
-  host's element stride, instead of indexing with the plugin's larger struct (which strides over the host's
-  element as soon as another renderer plugin answers first, scrambling the neighbours and crashing the host,
-  officially in strlen on a null renderer id, on the fork on a null render function)
+  official build, which has no layered overlay field): the host's entries array is indexed as bytes, with the
+  stride the announcing host really uses (for an official host, the end of the shared fields computed by offsets:
+  the struct is padded, so sizeof arithmetic on the plugin's own layout gives a stride belonging to no layout),
+  and its fields are written at their offsets. Indexing with the plugin's struct strides over the host's element
+  as soon as another renderer plugin answers first, scrambling the neighbours and the host's heap, and crashing
+  the host (officially in strlen on the id of an entry which was written half out of its slot)
+
+- B2S Pro plugin: the extended fields of the plugin API (layered overlay declaration, layered render contexts)
+  are only touched after the host announced the matching capability (VPXPI_MSG_HOST_FEATURES, sent by the host
+  right after loading a plugin): an official host, which knows no such message, gets the pre-existing behavior
+  (fully opaque backglass) and can not be reached by the extended layout. The announcement carries a magic
+  (message ids are shared integers, a payload of the right size is not a payload of the right message), hosts of
+  the first announcement generation are accepted as they are, and the features are latched: the layout the host
+  allocates can not change mid session
+
+- B2S Pro plugin: the 'Transparent parts shine through' setting is hidden from the plugin settings page, and a
+  line is logged, when the running host can not honor it (an official build: transparency is a host feature,
+  compositing the window renderers); the drawing is opaque there whatever the setting file says
 
 - ancillary window renderers: a renderer entry handed over without a render function is skipped (and reported in
   the log) instead of crashing the app through a call to a null pointer; the collected renderer list is logged at

@@ -134,7 +134,9 @@ typedef struct MsgSettingDef
    const char* propId;       // Unique Id of the property within the plugin
    const char* name;         // Human-readable name of the plugin
    const char* description;  // Human-readable description of the plugin intent
-   const int isUserEditable; // If non zero, exposed to user for edition
+   int isUserEditable;       // If non zero, exposed to user for edition. The host reads it when it builds the
+                            // plugin settings page, so a plugin may flip it at run time to hide a setting the
+                            // running host can not honor (dropping the 'const' changes no layout)
    const int type;           // See MSGPI_SETTING_TYPE_xxx
    union 
    {

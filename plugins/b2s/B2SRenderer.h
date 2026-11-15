@@ -33,6 +33,7 @@ class B2SServer;
 // itself follows it: one and the same setting drives both, applied when the renderers are collected, i.e. at
 // table load (restarting the table is enough for a change to be honored)
 bool ShineThrough();
+void AnnounceHostCapabilities();
 
 // Whether the running host announced (VPXPI_MSG_HOST_FEATURES) that it composites the ancillary window renderers
 // and shares our layout of the extended structs: the only case where reading VPXRenderContext2D::isLayered and

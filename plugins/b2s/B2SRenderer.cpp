@@ -99,6 +99,22 @@ bool ShineThrough() { return shineThroughProp_Get() != 0; }
 // its own, smaller layout, and reading isLayered from one would read past its struct (see VPXPlugin.h)
 bool TransparencyActive(VPXRenderContext2D* ctx) { return HostSupportsAncillaryLayering() && ctx != nullptr && ctx->isLayered != 0 && shineThroughProp_Get() != 0; }
 
+// Set the 'Transparent parts shine through' setting up for the running host and log what the host can do: the
+// transparency is a host feature (compositing the window's renderers below ours), a host which announced nothing
+// (any official Visual Pinball build) can not honor it. Its drawing is always opaque in that case (see
+// TransparencyActive), and the setting is hidden from the settings page: the host reads isUserEditable when it
+// builds the page. Called when the first server is created: the host announcement, if the host has one, has been
+// sent right after loading the plugin, long before any script runs
+void AnnounceHostCapabilities()
+{
+   const bool layered = HostSupportsAncillaryLayering();
+   shineThroughProp.isUserEditable = layered ? 1 : 0;
+   if (layered)
+      LOGI("Host announces ancillary renderer layering: the 'Transparent parts shine through' setting is available");
+   else
+      LOGI("The running host does not announce ancillary renderer layering (an official Visual Pinball build): transparency is not available, the backglass is always drawn opaque and the 'Transparent parts shine through' setting is hidden. A Visual Pinball built with the B2S Pro renderer compositing brings it back");
+}
+
 static const char* dualModeValues[] = { "Authentic", "Fantasy" };
 MSGPI_ENUM_VAL_SETTING(dualModeProp, "DualMode", "Dual Mode", "Active mode for dual backglasses (authentic or fantasy)", true, 1, 2, dualModeValues, 1);
 

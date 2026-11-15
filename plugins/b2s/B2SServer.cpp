@@ -423,6 +423,9 @@ B2SServer::B2SServer(const MsgPluginAPI* const msgApi, unsigned int endpointId, 
 
    m_msgApi->SubscribeMsg(m_endpointId, m_onGetAuxRendererId, OnGetRenderer, this);
    m_msgApi->BroadcastMsg(m_endpointId, m_onAuxRendererChgId, nullptr);
+   // Tell the user, in the log, what the running host can do about transparency, and hide the setting on hosts
+   // which can not: the host has sent its feature announcement, if it has one, right after loading the plugin
+   AnnounceHostCapabilities();
 
    // Locate the 'Switch' setter on the proxied PinMAME controller (used to pulse switches from animations)
    for (unsigned int i = 0; i < serverClassDef->nMembers; i++)
@@ -714,53 +717,16 @@ std::shared_ptr<B2STable> B2SServer::AcquireB2STable()
    return m_b2s;
 }
 
-#ifdef _WIN32
-   #include <windows.h>
-#endif
-
-// Diagnostics for the ancillary renderer collection: the string fields of the entries handed over by the other
-// plugins (and by us) are printed, and an official host crashes on a scrambled entry (a null id reaches its
-// strlen, a heap overflow puts 0xFFFFFFFF in a field). Reading them back is the only way to see the collection
-// state from a plugin, and it must not crash doing so: map check each pointer before printing it
-static const char* SafeStr(const char* p)
-{
-#ifdef _WIN32
-   if (p == nullptr)
-      return "(null)";
-   MEMORY_BASIC_INFORMATION mbi;
-   if (VirtualQuery(p, &mbi, sizeof(mbi)) == 0 || mbi.State != MEM_COMMIT)
-      return "(unmapped)";
-   const size_t avail = reinterpret_cast<size_t>(mbi.BaseAddress) + mbi.RegionSize - reinterpret_cast<size_t>(p);
-   for (size_t i = 0; i < avail; ++i)
-      if (p[i] == 0)
-         return p;
-   return "(unterminated)";
-#else
-   return p ? p : "(null)";
-#endif
-}
-
 // The stride of the host allocated entry array on a host without the isLayeredOverlay field (the official
 // layout): the end of the fields we share with it, computed by offsets (the struct is padded, sizeof arithmetic
-// on our own layout does not give it)
+// on our own layout does not give it: 'sizeof(ours) - sizeof(int)' is 44, a stride belonging to no layout, which
+// writes every entry after the first at a 4 bytes offset from the host's slots and past the end of its array)
 static constexpr size_t OfficialRendererStride = offsetof(AncillaryRendererDef, Render) + sizeof(AncillaryRendererDef::Render);
 
 void B2SServer::OnGetRenderer(const unsigned int, void* userData, void* msgData)
 {
    auto me = static_cast<B2SServer*>(userData);
    auto msg = static_cast<GetAncillaryRendererMsg*>(msgData);
-   // The stride the entries in front of us were written with, the same rule as our own write below
-   const size_t diagStride = HostSupportsAncillaryLayering() ? sizeof(AncillaryRendererDef) : OfficialRendererStride;
-   if (msg->entries != nullptr)
-      for (unsigned int i = 0; i < msg->count && i < 8; ++i)
-      {
-         const unsigned char* slot = reinterpret_cast<const unsigned char*>(msg->entries) + i * diagStride;
-         const char* idP = *reinterpret_cast<const char* const*>(slot + offsetof(AncillaryRendererDef, id));
-         const char* nameP = *reinterpret_cast<const char* const*>(slot + offsetof(AncillaryRendererDef, name));
-         const size_t ctxP = *reinterpret_cast<const size_t*>(slot + offsetof(AncillaryRendererDef, context));
-         const size_t renderP = *reinterpret_cast<const size_t*>(slot + offsetof(AncillaryRendererDef, Render));
-         LOGI("OnGetRenderer: entry " + std::to_string(i) + " of " + std::to_string(msg->count) + " in " + std::to_string(msg->maxEntryCount) + ": id \"" + SafeStr(idP) + "\" name \"" + SafeStr(nameP) + "\" ctx 0x" + std::to_string(ctxP) + " render 0x" + std::to_string(renderP));
-      }
    if ((msg->window == VPXWindowId::VPXWINDOW_Backglass) || (msg->window == VPXWindowId::VPXWINDOW_ScoreView))
    {
       if (msg->count < msg->maxEntryCount)
@@ -779,8 +745,8 @@ void B2SServer::OnGetRenderer(const unsigned int, void* userData, void* msgData)
          // Index it as bytes, with the stride the announcing host uses, and write the shared prefix fields at
          // their offsets (both layouts share them, the extended field sits at the end). The official stride is the
          // end of the shared prefix, computed by offsets: 'sizeof(our struct) - sizeof(int)' is not it, our struct
-         // is padded to the pointer alignment (44 on a 32/64 bit build, a stride belonging to no layout at all,
-         // which wrote every entry after the first past the host's slots and past the end of its array)
+         // is padded to the pointer alignment on 64 bit (44, a stride belonging to no layout at all, which wrote
+         // every entry after the first past the host's slots and past the end of its array)
          const size_t stride = layered ? sizeof(AncillaryRendererDef) : OfficialRendererStride;
          unsigned char* entry = reinterpret_cast<unsigned char*>(msg->entries) + msg->count * stride;
          *reinterpret_cast<decltype(AncillaryRendererDef::id)*>(entry + offsetof(AncillaryRendererDef, id)) = def.id;
@@ -790,21 +756,8 @@ void B2SServer::OnGetRenderer(const unsigned int, void* userData, void* msgData)
          *reinterpret_cast<decltype(AncillaryRendererDef::Render)*>(entry + offsetof(AncillaryRendererDef, Render)) = def.Render;
          if (layered)
             *reinterpret_cast<int*>(entry + offsetof(AncillaryRendererDef, isLayeredOverlay)) = ShineThrough() ? 1 : 0;
-         LOGI("OnGetRenderer: wrote our entry at slot " + std::to_string(msg->count) + " stride " + std::to_string(stride));
       }
       msg->count++;
-      // The state of the whole array at our exit: what the host will consume, and the last chance to see it before
-      // a host which misreads the collection crashes on it
-      if (msg->entries != nullptr && msg->count > 0 && msg->count <= msg->maxEntryCount && msg->maxEntryCount > 0)
-         for (unsigned int i = 0; i < msg->count && i < 8; ++i)
-         {
-            const unsigned char* slot = reinterpret_cast<const unsigned char*>(msg->entries) + i * diagStride;
-            const char* idP = *reinterpret_cast<const char* const*>(slot + offsetof(AncillaryRendererDef, id));
-            const char* nameP = *reinterpret_cast<const char* const*>(slot + offsetof(AncillaryRendererDef, name));
-            const size_t ctxP = *reinterpret_cast<const size_t*>(slot + offsetof(AncillaryRendererDef, context));
-            const size_t renderP = *reinterpret_cast<const size_t*>(slot + offsetof(AncillaryRendererDef, Render));
-            LOGI("OnGetRenderer: final entry " + std::to_string(i) + ": id \"" + SafeStr(idP) + "\" name \"" + SafeStr(nameP) + "\" ctx 0x" + std::to_string(ctxP) + " render 0x" + std::to_string(renderP));
-         }
    }
 }
 
