@@ -45,7 +45,18 @@ static unsigned int s_auxRendererChgId = 0;
 // layouts and never tells us about fields it does not have
 static unsigned int s_hostFeatures = 0;
 static unsigned int s_hostFeaturesMsgId = 0;
-static void OnHostFeatures(const unsigned int, void*, void* msgData) { s_hostFeatures = static_cast<const VPXHostFeaturesMsg*>(msgData)->features; }
+static void OnHostFeatures(const unsigned int, void*, void* msgData)
+{
+   // Message ids are shared integers recycled once their last user releases them: a handler subscribed to a recycled
+   // id gets foreign messages (a broadcasted settings id of 1, for instance, reads as 'ancillary layering supported',
+   // and the plugin then strides the host's entry array for a layout the host does not have, which corrupts its
+   // heap). Accept only a payload carrying the announcement magic, and only the features we know
+   constexpr unsigned int knownFeatures = VPXPLUGIN_HOSTFEATURE_ANCILLARY_LAYERING;
+   if (msgData == nullptr)
+      return;
+   const VPXHostFeaturesMsg* msg = static_cast<const VPXHostFeaturesMsg*>(msgData);
+   s_hostFeatures = (msg->magic == VPXPLUGIN_HOSTFEATURES_MAGIC) ? (msg->features & knownFeatures) : 0;
+}
 bool HostSupportsAncillaryLayering() { return (s_hostFeatures & VPXPLUGIN_HOSTFEATURE_ANCILLARY_LAYERING) != 0; }
 static int shineThroughProp_Val = 0;
 static int shineThroughProp_Get() { return shineThroughProp_Val; }

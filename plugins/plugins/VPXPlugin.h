@@ -170,8 +170,15 @@ typedef struct AncillaryRendererDef
 typedef struct VPXHostFeaturesMsg
 {
    unsigned int features; // Bitwise OR of the VPXPLUGIN_HOSTFEATURE_* bits below
+   unsigned int magic;    // VPXPLUGIN_HOSTFEATURES_MAGIC: identifies the payload as this message
 } VPXHostFeaturesMsg;
 
+#define VPXPLUGIN_HOSTFEATURES_MAGIC 0x56504846u // 'VPHF': message ids are integers shared across all messages and are
+                                                  // recycled when their last user releases them, so a handler subscribed
+                                                  // to a recycled id receives foreign messages with foreign payloads (an
+                                                  // int payload of 1, a settings id for example, would read as
+                                                  // ancillary layering support). Only accept an announcement carrying the
+                                                  // magic
 #define VPXPLUGIN_HOSTFEATURE_ANCILLARY_LAYERING (1u << 0) // The host composites the ancillary window renderers: it reads
                                                            // AncillaryRendererDef::isLayeredOverlay in the arrays it collects,
                                                            // writes VPXRenderContext2D::isLayered at every ancillary render
