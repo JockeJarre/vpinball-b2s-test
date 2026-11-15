@@ -729,9 +729,9 @@ void B2SServer::OnGetRenderer(const unsigned int, void* userData, void* msgData)
       for (unsigned int i = 0; i < msg->count; ++i)
       {
          const unsigned char* slot = reinterpret_cast<const unsigned char*>(msg->entries) + i * 40; // official layout, the layout an official host allocates
-         const size_t idP = *(const size_t*)(slot + 0), nameP = *(const size_t*)(slot + 8), ctxP = *(const size_t*)(slot + 24), renderP = *(const size_t*)(slot + 32);
+         const size_t idP = *(const size_t*)(slot + 0), nameP = *(const size_t*)(slot + 8), descP = *(const size_t*)(slot + 16), ctxP = *(const size_t*)(slot + 24), renderP = *(const size_t*)(slot + 32);
          char buf[512];
-         snprintf(buf, sizeof(buf), "  foreign entry %u: id 0x%zx \"%s\" name 0x%zx \"%s\" ctx 0x%zx render 0x%zx", i, idP, (const char*)idP, nameP, (const char*)nameP, ctxP, renderP);
+         snprintf(buf, sizeof(buf), "  foreign entry %u: id 0x%zx \"%s\" name 0x%zx \"%s\" desc 0x%zx \"%s\" ctx 0x%zx render 0x%zx", i, idP, (const char*)idP, nameP, (const char*)nameP, descP, (const char*)descP, ctxP, renderP);
          LOGI(buf);
       }
    if ((msg->window == VPXWindowId::VPXWINDOW_Backglass) || (msg->window == VPXWindowId::VPXWINDOW_ScoreView))
@@ -765,6 +765,17 @@ void B2SServer::OnGetRenderer(const unsigned int, void* userData, void* msgData)
          LOGI(ownBuf);
       }
       msg->count++;
+      // Final read of the whole array at the exit of the filling pass: this is the state the host consumes, if a
+      // slot turns to garbage it happens after this point (host side) or in a window we are not asked about
+      if (msg->entries != nullptr && msg->count > 0)
+         for (unsigned int i = 0; i < msg->count && i < 8; ++i)
+         {
+            const unsigned char* slot = reinterpret_cast<const unsigned char*>(msg->entries) + i * 40;
+            const size_t idP = *(const size_t*)(slot + 0), nameP = *(const size_t*)(slot + 8), descP = *(const size_t*)(slot + 16), ctxP = *(const size_t*)(slot + 24), renderP = *(const size_t*)(slot + 32);
+            char buf[512];
+            snprintf(buf, sizeof(buf), "  final entry %u: id 0x%zx \"%s\" name 0x%zx \"%s\" desc 0x%zx \"%s\" ctx 0x%zx render 0x%zx", i, idP, (const char*)idP, nameP, (const char*)nameP, descP, (const char*)descP, ctxP, renderP);
+            LOGI(buf);
+         }
    }
 }
 
