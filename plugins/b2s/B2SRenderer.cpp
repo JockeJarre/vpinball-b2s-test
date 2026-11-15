@@ -44,18 +44,28 @@ static unsigned int s_auxRendererChgId = 0;
 // touch on a host that declared the matching feature, an official host reads and writes with its own, smaller
 // layouts and never tells us about fields it does not have
 static unsigned int s_hostFeatures = 0;
+static bool s_hostFeaturesLatched = false; // the layout of the host's structures must not change mid session: one
+                                            // collection done at 40 bytes and the next at 48 scrambles both ways
 static unsigned int s_hostFeaturesMsgId = 0;
 static void OnHostFeatures(const unsigned int, void*, void* msgData)
 {
    // Message ids are shared integers recycled once their last user releases them: a handler subscribed to a recycled
    // id gets foreign messages (a broadcasted settings id of 1, for instance, reads as 'ancillary layering supported',
    // and the plugin then strides the host's entry array for a layout the host does not have, which corrupts its
-   // heap). Accept only a payload carrying the announcement magic, and only the features we know
-   constexpr unsigned int knownFeatures = VPXPLUGIN_HOSTFEATURE_ANCILLARY_LAYERING;
-   if (msgData == nullptr)
+   // heap). Accept only payloads identified as announcements
+   if (msgData == nullptr || s_hostFeaturesLatched)
       return;
    const VPXHostFeaturesMsg* msg = static_cast<const VPXHostFeaturesMsg*>(msgData);
-   s_hostFeatures = (msg->magic == VPXPLUGIN_HOSTFEATURES_MAGIC) ? (msg->features & knownFeatures) : 0;
+   if (msg->magic == VPXPLUGIN_HOSTFEATURES_MAGIC) {
+      s_hostFeatures = msg->features & VPXPLUGIN_HOSTFEATURE_ANCILLARY_LAYERING;
+      s_hostFeaturesLatched = true;
+   }
+   // Hosts of the first announcement generation, which announced a 4 bytes long struct with no magic: this plugin
+   // holds the message id for its whole life, so nothing else can broadcast on it, and the features field of that
+   // struct sits at the same offset: accept it. It can arrive at any time (a host which announces on plugin load,
+   // while a collection may already be running), so it is accepted as is: the magic hosts settle the layout at load
+   else
+      s_hostFeatures = msg->features & VPXPLUGIN_HOSTFEATURE_ANCILLARY_LAYERING;
 }
 bool HostSupportsAncillaryLayering() { return (s_hostFeatures & VPXPLUGIN_HOSTFEATURE_ANCILLARY_LAYERING) != 0; }
 static int shineThroughProp_Val = 0;
@@ -261,6 +271,7 @@ void B2SRenderer::UnregisterSettings(const MsgPluginAPI* const msgApi)
    s_hostFeaturesMsgId = 0;
    s_auxRendererChgId = 0;
    s_hostFeatures = 0;
+   s_hostFeaturesLatched = false;
    s_msgApi = nullptr;
 }
 
