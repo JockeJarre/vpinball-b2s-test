@@ -728,18 +728,22 @@ void B2SServer::OnGetRenderer(const unsigned int, void* userData, void* msgData)
          // refresh (see the hand rolled setting in B2SRenderer.cpp), so what is declared here is in step with
          // what is really drawn
          const AncillaryRendererDef& def = me->m_ancillaryRendererDef;
-         AncillaryRendererDef& entry = msg->entries[msg->count];
-         // Filled field by field up to the official layout: the entries array is allocated by the host, whose
-         // AncillaryRendererDef is its own (an official host has no isLayeredOverlay, its elements are smaller
-         // than ours), and copying the whole struct would write past the host's element. The extended field is
-         // only handed to a host that announced it shares our layout (VPXPI_MSG_HOST_FEATURES, B2SRenderer.cpp)
-         entry.id = def.id;
-         entry.name = def.name;
-         entry.description = def.description;
-         entry.context = def.context;
-         entry.Render = def.Render;
-         if (HostSupportsAncillaryLayering())
-            entry.isLayeredOverlay = ShineThrough() ? 1 : 0;
+         const bool layered = HostSupportsAncillaryLayering();
+         // The entries array is allocated by the host, whose layout of AncillaryRendererDef is its own: an official
+         // host has no isLayeredOverlay, its elements are 8 bytes smaller than ours. Indexing the array with our
+         // sizeof strides over the host's element (the stride applies to the whole array, not to the field we stop
+         // writing at), scrambling the neighbouring entries of the other renderer plugins and the host's heap.
+         // Index it as bytes, with the stride the announcing host uses, and write the shared prefix fields at
+         // their offsets (both layouts share them, the extended field sits at the end)
+         const size_t stride = layered ? sizeof(AncillaryRendererDef) : sizeof(AncillaryRendererDef) - sizeof(int);
+         unsigned char* entry = reinterpret_cast<unsigned char*>(msg->entries) + msg->count * stride;
+         *reinterpret_cast<decltype(AncillaryRendererDef::id)*>(entry + offsetof(AncillaryRendererDef, id)) = def.id;
+         *reinterpret_cast<decltype(AncillaryRendererDef::name)*>(entry + offsetof(AncillaryRendererDef, name)) = def.name;
+         *reinterpret_cast<decltype(AncillaryRendererDef::description)*>(entry + offsetof(AncillaryRendererDef, description)) = def.description;
+         *reinterpret_cast<decltype(AncillaryRendererDef::context)*>(entry + offsetof(AncillaryRendererDef, context)) = def.context;
+         *reinterpret_cast<decltype(AncillaryRendererDef::Render)*>(entry + offsetof(AncillaryRendererDef, Render)) = def.Render;
+         if (layered)
+            *reinterpret_cast<int*>(entry + offsetof(AncillaryRendererDef, isLayeredOverlay)) = ShineThrough() ? 1 : 0;
       }
       msg->count++;
    }

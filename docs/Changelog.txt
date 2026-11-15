@@ -288,6 +288,12 @@ FEATURES:
 
 FIXES:
 
+- B2S Pro plugin: fix the renderer declaration handed to a host built with a smaller AncillaryRendererDef (an
+  official build, which has no layered overlay field): the host's entries array is indexed as bytes with the
+  host's element stride, instead of indexing with the plugin's larger struct (which strides over the host's
+  element as soon as another renderer plugin answers first, scrambling the neighbours and crashing the host,
+  officially in strlen on a null renderer id, on the fork on a null render function)
+
 - ancillary window renderers: a renderer entry handed over without a render function is skipped (and reported in
   the log) instead of crashing the app through a call to a null pointer; the collected renderer list is logged at
   startup to spot such an entry
