@@ -75,7 +75,9 @@ jobs:
         # MSVC is a multi-config generator and places the DLL under a per-config subdirectory
         run: |
           mkdir -p staging/b2s-pro
-          cp build/plugins/b2s-pro/plugin.cfg staging/b2s-pro/
+          # Stamp the plugin settings with the commit: it shows in the VPX plugin list UI, next to the file
+          # properties and the load time log line, so a running install can be identified at a glance
+          sed -E "s/^version = .*/version = \"0.1.0-${GITHUB_SHA:0:9}\"/" plugins/b2s/plugin.cfg > staging/b2s-pro/plugin.cfg
           if compgen -G "build/plugins/b2s-pro/*.dll" > /dev/null; then
             cp build/plugins/b2s-pro/*.dll staging/b2s-pro/
           else

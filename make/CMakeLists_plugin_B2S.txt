@@ -56,6 +56,30 @@ set(B2S_PLUGIN_SOURCES
    third-party/include/tinyxml2/tinyxml2.cpp
 )
 
+# Which sources a build came from: the git revision and the build time. Every build of this plugin looks identical
+# on disk, and shipping 'the latest' blindly made us retest an already fixed build too many times: log it at load,
+# stamp the binary's file properties with it and stamp the CI package name with it
+find_package(Git QUIET)
+set(B2S_BUILD_ID "local (no git)")
+if(GIT_FOUND)
+   execute_process(COMMAND "${GIT_EXECUTABLE}" rev-parse --short=9 HEAD OUTPUT_VARIABLE B2S_GIT_SHA OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+   if(B2S_GIT_SHA)
+      string(TIMESTAMP B2S_BUILD_TIME "%Y-%m-%d %H:%M UTC" UTC)
+      set(B2S_BUILD_ID "${B2S_GIT_SHA} (${B2S_BUILD_TIME})")
+   endif()
+endif()
+
+if(BUILD_SHARED AND PLATFORM STREQUAL "windows" AND MSVC)
+   # The Windows file properties (Explorer Details tab) of the library: name the file the build really is
+   if(ARCH STREQUAL "x64")
+      set(B2S_PLUGIN_DLL_NAME "plugin-b2spro64.dll")
+   else()
+      set(B2S_PLUGIN_DLL_NAME "plugin-b2spro.dll")
+   endif()
+   configure_file("${CMAKE_SOURCE_DIR}/plugins/b2s/version_info.rc.in" "${CMAKE_BINARY_DIR}/B2SPlugin_version_info.rc" @ONLY)
+   list(APPEND B2S_PLUGIN_SOURCES "${CMAKE_BINARY_DIR}/B2SPlugin_version_info.rc")
+endif()
+
 if(BUILD_SHARED)
    add_library(B2SPlugin MODULE ${B2S_PLUGIN_SOURCES})
 
@@ -64,6 +88,8 @@ if(BUILD_SHARED)
       plugins
       plugins/b2s
    )
+
+   target_compile_definitions(B2SPlugin PRIVATE B2SPLUGIN_BUILD_ID="${B2S_BUILD_ID}")
 
    if(PLATFORM STREQUAL "windows" OR PLATFORM STREQUAL "windows-mingw")
       if(MSVC)
@@ -147,5 +173,7 @@ if(BUILD_STATIC)
       PREFIX ""
       OUTPUT_NAME "plugin-b2spro"
    )
+
+   target_compile_definitions(B2SPlugin PRIVATE B2SPLUGIN_BUILD_ID="${B2S_BUILD_ID}")
 endif()
 

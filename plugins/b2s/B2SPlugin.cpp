@@ -247,12 +247,21 @@ void DeleteTexture(VPXTexture texture)
 
 using namespace B2S;
 
+// Which sources this library was built from, handed over by CMake (git rev + build time). Every build of this
+// plugin looks identical on disk, and shipping 'the latest' blindly made us retest an already fixed build too
+// many times: log it, show it in the file properties and stamp the package name with it
+#ifndef B2SPLUGIN_BUILD_ID
+   #define B2SPLUGIN_BUILD_ID "local (no git)"
+#endif
+
 MSGPI_EXPORT void MSGPIAPI B2SProPluginLoad(const uint32_t sessionId, const MsgPluginAPI* api)
 {
    msgApi = api;
    endpointId = sessionId;
    apiThread = std::this_thread::get_id();
    LPISetup(endpointId, msgApi);
+
+   LOGI("B2S Pro plugin, build " B2SPLUGIN_BUILD_ID);
 
    // B2S Pro: both this plugin and the stock B2S plugin replace the B2S.Server COM object, so only one may be enabled
    if (msgApi->GetPluginEndpoint("B2S") != 0)
