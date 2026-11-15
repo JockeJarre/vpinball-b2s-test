@@ -730,7 +730,7 @@ static const char* SafeStr(const char* p)
    MEMORY_BASIC_INFORMATION mbi;
    if (VirtualQuery(p, &mbi, sizeof(mbi)) == 0 || mbi.State != MEM_COMMIT)
       return "(unmapped)";
-   const size_t avail = static_cast<size_t>(reinterpret_cast<const uintptr_t*>(mbi.BaseAddress) + mbi.RegionSize - reinterpret_cast<uintptr_t>(p));
+   const size_t avail = reinterpret_cast<size_t>(mbi.BaseAddress) + mbi.RegionSize - reinterpret_cast<size_t>(p);
    for (size_t i = 0; i < avail; ++i)
       if (p[i] == 0)
          return p;
