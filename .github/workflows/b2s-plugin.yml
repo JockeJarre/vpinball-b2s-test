@@ -56,6 +56,11 @@ jobs:
       PKG_NAME: b2s-pro-windows-x64-${{ inputs.config || 'Release' }}
     steps:
       - uses: actions/checkout@v6
+      - name: Stamp the package name with the commit
+        # Every build used to ship under the same zip, artifact and DLL names, which made 'test the
+        # latest' a guessing game: name the zip, the artifact and the settings version with the commit
+        # (the DLL file properties and the load log line carry it as well)
+        run: echo "short_sha=${GITHUB_SHA:0:9}" >> "$GITHUB_ENV"
       - uses: microsoft/setup-msbuild@v3
       - name: Fetch the PinMAME plugin API header
         # The plugin includes pinmame/PinMAMEPlugin.h from third-party/include/pinmame, which the
@@ -84,12 +89,12 @@ jobs:
             cp build/plugins/b2s-pro/"${{ inputs.config || 'Release' }}"/*.dll staging/b2s-pro/
           fi
           cd staging
-          7z a -tzip "../${PKG_NAME}.zip" b2s-pro
+          7z a -tzip "../${PKG_NAME}-${short_sha}.zip" b2s-pro
           # Fail loudly instead of uploading nothing when the package is missing/empty
-          test -s "../${PKG_NAME}.zip"
+          test -s "../${PKG_NAME}-${short_sha}.zip"
       - uses: actions/upload-artifact@v7
         with:
-          name: ${{ env.PKG_NAME }}
-          path: ${{ env.PKG_NAME }}.zip
+          name: ${{ env.PKG_NAME }}-${{ env.short_sha }}
+          path: ${{ env.PKG_NAME }}-${{ env.short_sha }}.zip
           archive: false
           if-no-files-found: error
