@@ -722,6 +722,18 @@ void B2SServer::OnGetRenderer(const unsigned int, void* userData, void* msgData)
    // plugin enabled, and the host side logging does not exist on an official build: log both passes from here to
    // reconstruct the collection (counting pass: entries is null; filling pass: entries is the host array)
    LOGI("OnGetRenderer: window " + std::to_string((int)msg->window) + " count " + std::to_string(msg->count) + " max " + std::to_string(msg->maxEntryCount) + " entries " + (msg->entries ? "set" : "null"));
+   // On the filling pass, read back the entries the other plugins handed over (at the official 40 byte stride, the
+   // layout an official host allocates) before writing ours: the official host crashes on a scrambled entry of
+   // this array, and only reading it from a plugin shows who handed what over
+   if (msg->entries != nullptr)
+      for (unsigned int i = 0; i < msg->count; ++i)
+      {
+         const unsigned char* slot = reinterpret_cast<const unsigned char*>(msg->entries) + i * 40; // official layout, the layout an official host allocates
+         const size_t idP = *(const size_t*)(slot + 0), nameP = *(const size_t*)(slot + 8), ctxP = *(const size_t*)(slot + 24), renderP = *(const size_t*)(slot + 32);
+         char buf[512];
+         snprintf(buf, sizeof(buf), "  foreign entry %u: id 0x%zx \"%s\" name 0x%zx \"%s\" ctx 0x%zx render 0x%zx", i, idP, (const char*)idP, nameP, (const char*)nameP, ctxP, renderP);
+         LOGI(buf);
+      }
    if ((msg->window == VPXWindowId::VPXWINDOW_Backglass) || (msg->window == VPXWindowId::VPXWINDOW_ScoreView))
    {
       if (msg->count < msg->maxEntryCount)
@@ -748,6 +760,9 @@ void B2SServer::OnGetRenderer(const unsigned int, void* userData, void* msgData)
          *reinterpret_cast<decltype(AncillaryRendererDef::Render)*>(entry + offsetof(AncillaryRendererDef, Render)) = def.Render;
          if (layered)
             *reinterpret_cast<int*>(entry + offsetof(AncillaryRendererDef, isLayeredOverlay)) = ShineThrough() ? 1 : 0;
+         char ownBuf[256];
+         snprintf(ownBuf, sizeof(ownBuf), "  our entry %u written: id 0x%zx \"%s\" name 0x%zx \"%s\"", msg->count, (size_t)def.id, def.id ? def.id : "(null)", (size_t)def.name, def.name ? def.name : "(null)");
+         LOGI(ownBuf);
       }
       msg->count++;
    }
