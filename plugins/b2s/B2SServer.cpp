@@ -718,6 +718,10 @@ void B2SServer::OnGetRenderer(const unsigned int, void* userData, void* msgData)
 {
    auto me = static_cast<B2SServer*>(userData);
    auto msg = static_cast<GetAncillaryRendererMsg*>(msgData);
+   // The host crashes (official, in strlen on a scrambled renderer entry) while collecting this list with this
+   // plugin enabled, and the host side logging does not exist on an official build: log both passes from here to
+   // reconstruct the collection (counting pass: entries is null; filling pass: entries is the host array)
+   LOGI("OnGetRenderer: window " + std::to_string((int)msg->window) + " count " + std::to_string(msg->count) + " max " + std::to_string(msg->maxEntryCount) + " entries " + (msg->entries ? "set" : "null"));
    if ((msg->window == VPXWindowId::VPXWINDOW_Backglass) || (msg->window == VPXWindowId::VPXWINDOW_ScoreView))
    {
       if (msg->count < msg->maxEntryCount)
