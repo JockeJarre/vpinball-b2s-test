@@ -740,12 +740,17 @@ static const char* SafeStr(const char* p)
 #endif
 }
 
+// The stride of the host allocated entry array on a host without the isLayeredOverlay field (the official
+// layout): the end of the fields we share with it, computed by offsets (the struct is padded, sizeof arithmetic
+// on our own layout does not give it)
+static constexpr size_t OfficialRendererStride = offsetof(AncillaryRendererDef, Render) + sizeof(AncillaryRendererDef::Render);
+
 void B2SServer::OnGetRenderer(const unsigned int, void* userData, void* msgData)
 {
    auto me = static_cast<B2SServer*>(userData);
    auto msg = static_cast<GetAncillaryRendererMsg*>(msgData);
    // The stride the entries in front of us were written with, the same rule as our own write below
-   const size_t diagStride = HostSupportsAncillaryLayering() ? sizeof(AncillaryRendererDef) : sizeof(AncillaryRendererDef) - sizeof(int);
+   const size_t diagStride = HostSupportsAncillaryLayering() ? sizeof(AncillaryRendererDef) : OfficialRendererStride;
    if (msg->entries != nullptr)
       for (unsigned int i = 0; i < msg->count && i < 8; ++i)
       {
@@ -772,8 +777,11 @@ void B2SServer::OnGetRenderer(const unsigned int, void* userData, void* msgData)
          // sizeof strides over the host's element (the stride applies to the whole array, not to the field we stop
          // writing at), scrambling the neighbouring entries of the other renderer plugins and the host's heap.
          // Index it as bytes, with the stride the announcing host uses, and write the shared prefix fields at
-         // their offsets (both layouts share them, the extended field sits at the end)
-         const size_t stride = layered ? sizeof(AncillaryRendererDef) : sizeof(AncillaryRendererDef) - sizeof(int);
+         // their offsets (both layouts share them, the extended field sits at the end). The official stride is the
+         // end of the shared prefix, computed by offsets: 'sizeof(our struct) - sizeof(int)' is not it, our struct
+         // is padded to the pointer alignment (44 on a 32/64 bit build, a stride belonging to no layout at all,
+         // which wrote every entry after the first past the host's slots and past the end of its array)
+         const size_t stride = layered ? sizeof(AncillaryRendererDef) : OfficialRendererStride;
          unsigned char* entry = reinterpret_cast<unsigned char*>(msg->entries) + msg->count * stride;
          *reinterpret_cast<decltype(AncillaryRendererDef::id)*>(entry + offsetof(AncillaryRendererDef, id)) = def.id;
          *reinterpret_cast<decltype(AncillaryRendererDef::name)*>(entry + offsetof(AncillaryRendererDef, name)) = def.name;
