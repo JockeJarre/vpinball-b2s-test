@@ -2786,6 +2786,11 @@ void Player::OnAuxRendererChanged(const unsigned int msgId, void* userData, void
          { return priorities[a.id] > priorities[b.id]; }); // Sort in descending order (first is the most wanted)
       std::erase_if(me->m_ancillaryWndRenderers[window],
          [&priorities](const AncillaryRendererDef &a) { return priorities[a.id] < 0; });
+      // Diagnostics: a renderer reaching the render loop with no render function crashes the app (a call through a
+      // null pointer), and it is not obvious which plugin handed such an entry: log the collected list
+      for (const auto& renderer : me->m_ancillaryWndRenderers[window])
+         PLOGI << "Collected ancillary renderer, window " << (int)window << ": id '" << (renderer.id ? renderer.id : "(null)")
+            << "', render " << (const void*)renderer.Render << ", layered overlay " << renderer.isLayeredOverlay;
    }
 }
 

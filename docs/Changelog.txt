@@ -288,6 +288,10 @@ FEATURES:
 
 FIXES:
 
+- ancillary window renderers: a renderer entry handed over without a render function is skipped (and reported in
+  the log) instead of crashing the app through a call to a null pointer; the collected renderer list is logged at
+  startup to spot such an entry
+
 - B2S Pro plugin: fix the DMD overlays of a .B2SPro/.directb2s document showing at the wrong height when
   'Keep aspect ratio' is turned on: the render quad of a display is measured bottom-up, so the vertical
   placement of the content on the padded surface has to be subtracted there, not added

@@ -2277,6 +2277,11 @@ void Renderer::RenderAncillaryWindow(VPXWindowId window, const VPX::RenderOutput
       context.isLayered = 0; // A renderer which leaves areas untouched shows the window clear, not a renderer below
       for (auto& renderer : ancillaryWndRenderers)
       {
+         if (renderer.Render == nullptr) // Should not happen: an entry handed without a render function (a plugin built
+         {                               // against another layout leaves one here); skip it rather than call address zero
+            PLOGE << "Ancillary renderer '" << (renderer.id ? renderer.id : "(null)") << "' has no render function, skipping";
+            continue;
+         }
          rendered = renderer.Render(&context, renderer.context);
          if (rendered)
             break;
@@ -2293,6 +2298,11 @@ void Renderer::RenderAncillaryWindow(VPXWindowId window, const VPX::RenderOutput
          VPXRenderContext2D& context = GetAncillaryRenderContext(window, contentW, contentH, true, isOutputLinear, 0.f);
          context.isLayered = 1; // The renderers below shine through the areas this one leaves untouched
          rd->ResetRenderState();
+         if (renderer.Render == nullptr) // See above: skip, do not call address zero
+         {
+            PLOGE << "Ancillary renderer '" << (renderer.id ? renderer.id : "(null)") << "' has no render function, skipping";
+            continue;
+         }
          if (renderer.Render(&context, renderer.context))
             rendered = true;
       }
